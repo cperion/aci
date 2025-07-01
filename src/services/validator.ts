@@ -128,6 +128,12 @@ export function buildSharingRestUrl(baseUrl: string): string {
     return `${normalized}/sharing/rest`;
   }
   
+  // Check if the base URL already ends with /portal
+  // (like https://rsig.parisladefense.com/portal)
+  if (normalized.match(/\/portal$/i)) {
+    return `${normalized}/sharing/rest`;
+  }
+  
   // Enterprise portals typically use /portal/sharing/rest
   if (isEnterprisePortal(baseUrl)) {
     return `${normalized}/portal/sharing/rest`;

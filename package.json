@@ -24,10 +24,16 @@
   "dependencies": {
     "@esri/arcgis-rest-auth": "^3.8.0",
     "@esri/arcgis-rest-feature-service": "^4.1.0",
-    "@esri/arcgis-rest-portal": "^4.6.1",
     "@esri/arcgis-rest-request": "^4.6.0",
+    "@inkjs/ui": "^2.0.0",
+    "@types/react": "^19.1.8",
+    "chalk": "^5.4.1",
+    "chalk-table": "^1.0.2",
     "commander": "^14.0.0",
+    "ink": "^6.0.1",
     "keytar": "^7.9.0",
-    "read": "^4.1.0"
+    "react": "^19.1.0",
+    "read": "^4.1.0",
+    "strip-ansi": "^7.1.0"
   }
 }

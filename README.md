@@ -24,6 +24,30 @@ bun run build
 bun run dev
 ```
 
+### WSL2 Dependencies
+
+On WSL2, the secure credential storage requires additional dependencies:
+
+```bash
+# Install required packages for keyring support
+sudo apt-get update
+sudo apt-get install libsecret-1-0 libsecret-1-dev
+
+# If you still encounter issues, you may need:
+sudo apt-get install gnome-keyring dbus-x11
+```
+
+**Note**: If keyring services are unavailable in your WSL2 environment, you can use token-based authentication as a workaround:
+
+```bash
+# Get admin token manually
+curl -X POST "https://your-server.com/arcgis/admin/generateToken" \
+  -d "username=admin&password=YOUR_PASSWORD&client=requestip&f=json"
+
+# Use the token directly
+aci admin login --server https://your-server.com/arcgis/admin --token YOUR_TOKEN
+```
+
 ## Quick Start
 
 ### 1. Configure Your Environments

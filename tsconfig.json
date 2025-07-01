@@ -7,6 +7,10 @@
     "moduleDetection": "force",
     "allowJs": true,
 
+    // JSX support for Ink
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+
     // Node.js CLI mode
     "moduleResolution": "bundler",
     "allowImportingTsExtensions": true,

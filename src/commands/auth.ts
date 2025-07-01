@@ -1,4 +1,4 @@
-import { getSession, saveSession, clearSession, getPortalUrl, getCurrentEnvironment, listEnvironments } from '../session.js';
+import { getSession, saveSession, clearSession, getPortalUrl, getCurrentEnvironment, setCurrentEnvironment, listEnvironments } from '../session.js';
 import type { Environment } from '../session.js';
 import { UserSession } from '@esri/arcgis-rest-auth';
 import { handleError } from '../errors/handler.js';
@@ -33,6 +33,11 @@ interface LoginOptions {
 
 export async function loginCommand(options: LoginOptions): Promise<void> {
   try {
+    // Persist environment selection if specified
+    if (options.env) {
+      setCurrentEnvironment(options.env);
+    }
+    
     // Get portal URL from environment or explicit portal option
     const inputPortal = options.portal || getPortalUrl(options.env);
     const basePortalUrl = normalizeBasePortalUrl(inputPortal);
@@ -286,7 +291,7 @@ export async function logoutCommand(options: LogoutOptions = {}): Promise<void> 
 export async function statusCommand(): Promise<void> {
   try {
     const currentEnv = getCurrentEnvironment();
-    const session = await getSession();
+    const session = await getSession(currentEnv);
     
     console.log(`Current environment: ${currentEnv}`);
     

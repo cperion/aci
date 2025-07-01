@@ -1,5 +1,22 @@
 import type { AdminSession } from '../session.js';
 import { AdminAuthenticationError, ServiceOperationError, TimeoutError } from '../error.js';
+import type { 
+  DataStoreInfo, 
+  HealthReport, 
+  BackupStatus, 
+  MachineStatus,
+  RawDataStoreResponse,
+  RawHealthResponse,
+  DataStoreType,
+  DataStoreStatus,
+  MachineRole
+} from '../types/datastore.js';
+import { 
+  DataStoreNotFoundError, 
+  DataStoreConnectionError, 
+  DataStoreTimeoutError,
+  InvalidDataStoreResponseError 
+} from '../errors/datastore-errors.js';
 
 export interface ServiceInfo {
   serviceName: string;
@@ -222,6 +239,289 @@ export class ArcGISServerAdminClient {
         `Failed to get logs: ${(error as Error).message}`
       );
     }
+  }
+
+  // =============================================================================
+  // DATA STORE OPERATIONS
+  // =============================================================================
+
+  /**
+   * List all registered data stores
+   */
+  async listDatastores(): Promise<DataStoreInfo[]> {
+    try {
+      const response: RawDataStoreResponse = await this.request('data');
+      
+      if (!response.datastores) {
+        return [];
+      }
+      
+      const datastores: DataStoreInfo[] = [];
+      
+      for (const store of response.datastores) {
+        const datastoreInfo: DataStoreInfo = {
+          name: store.name,
+          type: this.normalizeDataStoreType(store.type),
+          provider: store.provider,
+          status: 'Healthy', // Default - will be updated with health check
+          path: store.path,
+          onServerStart: store.onServerStart ?? false,
+          isManaged: store.isManaged ?? false
+        };
+        
+        // Quick health check to get actual status
+        try {
+          const health = await this.getDataStoreQuickHealth(store.name, store.path);
+          datastoreInfo.status = health.status;
+          datastoreInfo.machineCount = health.machines?.length;
+        } catch (error) {
+          // If health check fails, mark as unhealthy but continue
+          datastoreInfo.status = 'Unhealthy';
+          datastoreInfo.connectionStatus = 'Failed to connect';
+        }
+        
+        datastores.push(datastoreInfo);
+      }
+      
+      return datastores;
+      
+    } catch (error) {
+      throw new ServiceOperationError(
+        `Failed to list data stores: ${(error as Error).message}`
+      );
+    }
+  }
+
+  /**
+   * Validate health of a specific data store
+   */
+  async validateDatastore(name: string, options: { timeout?: number } = {}): Promise<HealthReport> {
+    const timeout = options.timeout || 30000; // 30s default for cloud stores
+    
+    try {
+      const store = await this.findDataStore(name);
+      const validatePath = this.buildValidatePath(store.path);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeout);
+      
+      const response = await fetch(`${this.baseUrl}/${validatePath}`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          token: this.token,
+          f: 'json'
+        })
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        throw new DataStoreConnectionError(
+          name,
+          `Validation failed: ${response.status} ${response.statusText}`,
+          ['Check datastore accessibility', 'Verify admin credentials', 'Review firewall rules']
+        );
+      }
+      
+      const data: RawHealthResponse = await response.json();
+      
+      if (data.error) {
+        throw new DataStoreConnectionError(
+          name,
+          `ArcGIS Server Error ${data.error.code}: ${data.error.message}`
+        );
+      }
+      
+      return this.normalizeHealthReport(name, store.type, data);
+      
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') {
+        throw new DataStoreTimeoutError(name, 'validation', timeout);
+      }
+      if (error instanceof DataStoreNotFoundError || error instanceof DataStoreConnectionError) {
+        throw error;
+      }
+      throw new DataStoreConnectionError(
+        name,
+        `Validation failed: ${(error as Error).message}`
+      );
+    }
+  }
+
+  /**
+   * Get machine status for a specific data store
+   */
+  async getDataStoreMachines(name: string): Promise<MachineStatus[]> {
+    try {
+      const healthReport = await this.validateDatastore(name);
+      return healthReport.machines;
+    } catch (error) {
+      throw new ServiceOperationError(
+        `Failed to get machines for data store ${name}: ${(error as Error).message}`
+      );
+    }
+  }
+
+  /**
+   * Get backup information across all data stores
+   */
+  async getBackupInfo(): Promise<BackupStatus> {
+    try {
+      const response = await this.request('disaster-recovery/backupRestoreInfo');
+      
+      return {
+        lastFullBackup: response.lastFullBackup,
+        lastIncrementalBackup: response.lastIncrementalBackup,
+        lastRestore: response.lastRestore,
+        backupMode: response.backupMode || false,
+        availableBackups: response.availableBackups || []
+      };
+      
+    } catch (error) {
+      // Fallback for older ArcGIS versions without disaster recovery endpoint
+      if ((error as Error).message.includes('404') || (error as Error).message.includes('Not Found')) {
+        return {
+          backupMode: false,
+          availableBackups: []
+        };
+      }
+      throw new ServiceOperationError(
+        `Failed to get backup information: ${(error as Error).message}`
+      );
+    }
+  }
+
+  /**
+   * Find a data store by name from the registry
+   */
+  private async findDataStore(name: string): Promise<{ path: string; type: DataStoreType }> {
+    const response: RawDataStoreResponse = await this.request('data');
+    
+    if (!response.datastores) {
+      throw new DataStoreNotFoundError(name);
+    }
+    
+    const store = response.datastores.find(s => s.name === name);
+    if (!store) {
+      throw new DataStoreNotFoundError(name);
+    }
+    
+    return {
+      path: store.path,
+      type: this.normalizeDataStoreType(store.type)
+    };
+  }
+
+  /**
+   * Quick health check without full validation
+   */
+  private async getDataStoreQuickHealth(name: string, path: string): Promise<{ status: DataStoreStatus; machines?: any[] }> {
+    try {
+      // For quick health, just try to access the datastore info endpoint
+      const response = await this.request(`data/items${path}`);
+      return {
+        status: 'Healthy',
+        machines: response.machines
+      };
+    } catch (error) {
+      return { status: 'Unhealthy' };
+    }
+  }
+
+  /**
+   * Build validation path based on data store type and path
+   */
+  private buildValidatePath(datastorePath: string): string {
+    // Extract the appropriate validation endpoint based on path structure
+    if (datastorePath.includes('/enterpriseDatabases/')) {
+      return `data/items${datastorePath}/machines/primary/validate`;
+    } else if (datastorePath.includes('/cloudStores/')) {
+      return `data/items${datastorePath}/validate`;
+    } else if (datastorePath.includes('/nosqlDatabases/')) {
+      return `data/items${datastorePath}/machines/primary/validate`;
+    } else {
+      // Generic validation path
+      return `data/items${datastorePath}/validate`;
+    }
+  }
+
+  /**
+   * Normalize data store type from API response
+   */
+  private normalizeDataStoreType(apiType: string): DataStoreType {
+    const type = apiType.toLowerCase();
+    
+    if (type.includes('egdb') || type.includes('enterprise')) return 'enterprise';
+    if (type.includes('cloud') || type.includes('s3') || type.includes('azure') || type.includes('gcs')) return 'cloud';
+    if (type.includes('relational')) return 'relational';
+    if (type.includes('tile') || type.includes('cache')) return 'tileCache';
+    if (type.includes('spatiotemporal') || type.includes('bigdata')) return 'spatiotemporal';
+    if (type.includes('graph')) return 'graph';
+    if (type.includes('object')) return 'object';
+    if (type.includes('folder') || type.includes('file')) return 'fileShare';
+    if (type.includes('raster')) return 'raster';
+    
+    // Default fallback
+    return 'enterprise';
+  }
+
+  /**
+   * Normalize health report from various API response formats
+   */
+  private normalizeHealthReport(name: string, type: DataStoreType, data: RawHealthResponse): HealthReport {
+    const machines: MachineStatus[] = [];
+    
+    if (data.machines) {
+      for (const machine of data.machines) {
+        machines.push({
+          machineName: machine.machineName,
+          role: this.normalizeMachineRole(machine.role),
+          status: this.normalizeHealthStatus(machine.status),
+          version: machine.version,
+          databaseStatus: machine.databaseStatus as any,
+          replicationStatus: machine.replicationStatus as any,
+          lastSyncTime: machine.lastSyncTime,
+          diskUsage: machine.diskUsage ? {
+            dataDirectory: machine.diskUsage.dataDirectory || 'Unknown',
+            logDirectory: machine.diskUsage.logDirectory,
+            tempDirectory: machine.diskUsage.tempDirectory
+          } : undefined
+        });
+      }
+    }
+    
+    return {
+      name,
+      type,
+      status: this.normalizeHealthStatus(data.status),
+      overallHealth: data.overallHealth || data.status,
+      machines,
+      lastValidated: new Date().toISOString(),
+      warnings: data.warnings,
+      recommendations: data.recommendations
+    };
+  }
+
+  /**
+   * Normalize machine role from API response
+   */
+  private normalizeMachineRole(role: string): MachineRole {
+    const normalized = role.toUpperCase();
+    if (['PRIMARY', 'STANDBY', 'MEMBER'].includes(normalized)) {
+      return normalized as MachineRole;
+    }
+    return 'MEMBER'; // Default fallback
+  }
+
+  /**
+   * Normalize health status from API response
+   */
+  private normalizeHealthStatus(status: string): DataStoreStatus {
+    if (status === 'Healthy') return 'Healthy';
+    if (status === 'HealthyWithWarning') return 'HealthyWithWarning';
+    return 'Unhealthy';
   }
 
 

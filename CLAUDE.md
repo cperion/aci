@@ -17,6 +17,13 @@ This repository contains a **production-ready ACI (ArcGIS Command Line Interface
 ### External Documentation References
 - **[ArcGIS REST JS API](https://esri.github.io/arcgis-rest-js/api/)** - Official authentication patterns and UserSession documentation used for enterprise portal authentication implementation
 
+### Ink Documentation (For CLI → TUI Migration)
+- **`/docs/quick_ink_reference.md`** - Complete Ink API reference and documentation index
+  - This is the **primary entry point** when searching for Ink documentation
+  - Contains comprehensive API reference for ink, @inkjs/ui, and ink-table
+  - Includes full directory index of all Ink examples and documentation
+  - Provides migration patterns from Commander.js to Ink
+
 ### Final Architecture (Post-DeepSeek Consultations)
 
 The design has been refined through multiple rounds of architectural consultations with focus on YAGNI principles:
@@ -32,15 +39,24 @@ aci inspect <url>                   # Metadata inspection
 aci query <url> --where...          # Feature querying with federation
 aci logout                          # Session cleanup
 
+# Portal operations (simplified, no nested subcommands)
+aci users find "admin*"             # User search
+aci users get jsmith                # User profile
+aci groups create "Dev Team"        # Group creation
+aci groups find "gis*"              # Group search
+aci items find "transportation"     # Item search
+aci items share item123 -g g1,g2    # Item sharing
+
 # ArcGIS Online (future)
 aci login                           # OAuth2 flow for arcgis.com
 ```
 
 **Technology Stack:**
-- CLI Framework: Commander.js
+- CLI Framework: Commander.js (migrating to Ink for TUI)
 - Build: tsup (zero-config TypeScript)
 - Auth: keytar (secure token storage)
-- ArcGIS SDK: Selective @esri/arcgis-rest-* imports
+- ArcGIS SDK: Selective @esri/arcgis-rest-* imports (including @esri/arcgis-rest-portal)
+- TUI Framework: Ink (React for CLIs) with @inkjs/ui components
 
 **File Structure (15 files, ~1125 LOC):**
 ```
@@ -88,9 +104,14 @@ src/
 **Deferred to Phase 2:**
 - Complex deployment workflows
 - State machines (XState rejected for MVP)
-- Admin operations
 - Multi-output formats
 - Context memory
+
+**Portal Features (Simplified Implementation):**
+- Flattened command structure (no nested portal subcommands)
+- SDK-first approach using @esri/arcgis-rest-portal
+- Optional federation via ARCGIS_FEDERATION_ENABLED environment variable
+- Enterprise authentication integration with existing session management
 
 ## Key Technical Patterns
 
@@ -108,8 +129,8 @@ src/
 3. `aci login` (ArcGIS Online OAuth2 - future)
 
 **Enterprise Features:**
-- Custom CA certificate support via `ARCGIS_CA_BUNDLE` environment variable
-- Federation token caching (100 tokens, 1hr TTL) for Portal→Server scenarios
+- Custom CA certificate support via `NODE_EXTRA_CA_CERTS` environment variable
+- Optional federation support via `ARCGIS_FEDERATION_ENABLED` environment variable
 - Corporate firewall and proxy compatibility
 - Graceful fallback to direct server auth when federation fails
 
@@ -147,6 +168,11 @@ When implementing, follow these principles established through the design proces
 - **Error Handling**: Context-aware error messages with recovery suggestions
 - **TypeScript Compilation**: Zero errors, full type safety
 - **Output Formatting**: Specialized formatting for services vs layers vs relationships
+
+### 🚧 In Progress - Portal Features
+- **Portal Commands**: `users`, `groups`, `items` (simplified, no nested subcommands)
+- **SDK Integration**: @esri/arcgis-rest-portal for portal operations
+- **Enterprise Portal Support**: Integration with existing authentication system
 
 ### 🔧 Recent Improvements (July 2025)
 - **MAJOR SIMPLIFICATION**: Removed ~70% of overengineered code following DeepSeek R1 audit

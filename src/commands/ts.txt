@@ -1,0 +1,1715 @@
+import { Command } from 'commander';
+import type { AdminSession } from '../session.js';
+import { getAdminSession, requireAdminSession } from '../session.js';
+import { ArcGISServerAdminClient } from '../services/admin-client.js';
+import { handleError } from '../errors/handler.js';
+import { AdminAuthenticationError, InsufficientPrivilegesError } from '../error.js';
+import { formatServiceTable, formatServiceStatus } from '../utils/output.js';
+import { 
+  listDatastoresCommand, 
+  validateDatastoreCommand, 
+  machinesCommand, 
+  backupInfoCommand 
+} from './datastores.js';
+
+export interface AdminCommandOptions {
+  env?: string;
+  wait?: boolean;
+  folder?: string;
+  status?: string;
+  tail?: number;
+  level?: string;
+  detailed?: boolean;
+  days?: number;
+  format?: string;
+}
+
+/**
+ * HTTPS enforcement hook for admin commands
+ */
+async function enforceHTTPS(command: Command): Promise<void> {
+  // Get current environment's server admin URL
+  const env = command.getOptionValue('env');
+  const session = await getAdminSession(env);
+  
+  if (session?.serverAdminUrl && !session.serverAdminUrl.startsWith('https://')) {
+    throw new AdminAuthenticationError(
+      'Admin operations require HTTPS. Configure server_admin URL with https:// in .acirc'
+    );
+  }
+}
+
+/**
+ * Register all admin commands with the main CLI program
+ */
+export function registerAdminCommands(program: Command): void {
+  const adminCmd = program
+    .command('admin')
+    .description('ArcGIS Server administration operations')
+    .hook('preAction', enforceHTTPS);
+
+  // Authentication commands
+  registerAdminAuthCommands(adminCmd);
+
+  // Services administration
+  registerServicesCommands(adminCmd);
+  
+  // Logs administration  
+  registerLogsCommands(adminCmd);
+  
+  // Status and health
+  registerStatusCommands(adminCmd);
+  
+  // Data store management
+  registerDatastoreCommands(adminCmd);
+}
+
+/**
+ * Register admin authentication commands
+ */
+function registerAdminAuthCommands(adminCmd: Command): void {
+  adminCmd
+    .command('login')
+    .description('Authenticate for admin operations')
+    .option('--token <token>', 'Admin API token')
+    .option('--server <url>', 'ArcGIS Server admin URL')
+    .option('--username <username>', 'Username for admin authentication')
+    .option('--env <environment>', 'Environment to authenticate for')
+    .action(adminLoginCommand);
+
+  adminCmd
+    .command('logout')
+    .description('Clear admin authentication')
+    .option('--env <environment>', 'Environment to logout from')
+    .action(adminLogoutCommand);
+}
+
+/**
+ * Register service management commands
+ */
+function registerServicesCommands(adminCmd: Command): void {
+  const servicesCmd = adminCmd
+    .command('services')
+    .description('Manage ArcGIS services');
+
+  servicesCmd
+    .command('list')
+    .description('List all services')
+    .option('--folder <name>', 'Filter by folder name')
+    .option('--status <status>', 'Filter by service status (STARTED, STOPPED)')
+    .option('--env <environment>', 'Environment to use')
+    .action(listServicesCommand);
+
+  servicesCmd
+    .command('status <name>')
+    .description('Get service status')
+    .option('--env <environment>', 'Environment to use')
+    .action(getServiceStatusCommand);
+
+  servicesCmd
+    .command('start <name>')
+    .description('Start a service')
+    .option('--wait', 'Wait for service to start completely')
+    .option('--env <environment>', 'Environment to use')
+    .action(startServiceCommand);
+
+  servicesCmd
+    .command('stop <name>')
+    .description('Stop a service')
+    .option('--wait', 'Wait for service to stop completely')
+    .option('--env <environment>', 'Environment to use')
+    .action(stopServiceCommand);
+
+  servicesCmd
+    .command('restart <name>')
+    .description('Restart a service')
+    .option('--wait', 'Wait for service to restart completely')
+    .option('--env <environment>', 'Environment to use')
+    .action(restartServiceCommand);
+}
+
+/**
+ * Register log management commands
+ */
+function registerLogsCommands(adminCmd: Command): void {
+  const logsCmd = adminCmd
+    .command('logs')
+    .description('Manage server logs');
+
+  logsCmd
+    .command('view')
+    .description('View server logs')
+    .option('--tail <n>', 'Number of recent log entries to show', '100')
+    .option('--level <level>', 'Log level filter (SEVERE, WARNING, INFO, FINE)')
+    .option('--env <environment>', 'Environment to use')
+    .action(viewLogsCommand);
+
+  logsCmd
+    .command('export')
+    .description('Export server logs')
+    .option('--days <n>', 'Number of days to export', '7')
+    .option('--format <format>', 'Export format (json, csv)', 'json')
+    .option('--env <environment>', 'Environment to use')
+    .action(exportLogsCommand);
+}
+
+/**
+ * Register status and health commands
+ */
+function registerStatusCommands(adminCmd: Command): void {
+  adminCmd
+    .command('status')
+    .description('Show admin session status and server health')
+    .option('--env <environment>', 'Environment to use')
+    .action(adminStatusCommand);
+
+  adminCmd
+    .command('health')
+    .description('Perform server health check')
+    .option('--detailed', 'Show detailed health information')
+    .option('--env <environment>', 'Environment to use')
+    .action(healthCheckCommand);
+}
+
+/**
+ * Register data store management commands
+ */
+function registerDatastoreCommands(adminCmd: Command): void {
+  const datastoresCmd = adminCmd
+    .command('datastores')
+    .description('Data store management operations');
+
+  datastoresCmd
+    .command('list')
+    .description('List registered data stores')
+    .option('--env <environment>', 'Environment to use')
+    .action(listDatastoresCommand);
+
+  datastoresCmd
+    .command('validate <name>')
+    .description('Validate health of a specific data store')
+    .option('--detailed', 'Show detailed health information')
+    .option('--timeout <seconds>', 'Validation timeout in seconds')
+    .option('--env <environment>', 'Environment to use')
+    .action(validateDatastoreCommand);
+
+  datastoresCmd
+    .command('machines <name>')
+    .description('Show machine status for data store')
+    .option('--env <environment>', 'Environment to use')
+    .action(machinesCommand);
+
+  datastoresCmd
+    .command('backup-info')
+    .description('Show backup status across all data stores')
+    .option('--env <environment>', 'Environment to use')
+    .action(backupInfoCommand);
+}
+
+// Command Implementations
+
+export async function listServicesCommand(options: AdminCommandOptions): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    console.log(`Fetching services${options.folder ? ` from folder: ${options.folder}` : ''}...`);
+    
+    const services = await client.listServices(options.folder);
+    
+    // Filter by status if specified
+    const filteredServices = options.status 
+      ? services.filter(service => service.status === options.status!.toUpperCase())
+      : services;
+    
+    if (filteredServices.length === 0) {
+      console.log('No services found matching the criteria.');
+      return;
+    }
+    
+    console.log(formatServiceTable(filteredServices));
+    console.log(`\nTotal: ${filteredServices.length} service(s)`);
+    
+  } catch (error) {
+    handleError(error, 'Failed to list services');
+  }
+}
+
+export async function getServiceStatusCommand(name: string, options: AdminCommandOptions): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    console.log(`Checking status for service: ${name}...`);
+    
+    const serviceInfo = await client.getServiceStatus(name);
+    console.log(formatServiceStatus(serviceInfo));
+    
+  } catch (error) {
+    handleError(error, `Failed to get status for service: ${name}`);
+  }
+}
+
+export async function startServiceCommand(name: string, options: AdminCommandOptions): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    console.log(`Starting service: ${name}...`);
+    
+    await client.startService(name, options.wait);
+    
+    if (options.wait) {
+      console.log(`✓ Service ${name} started successfully`);
+    } else {
+      console.log(`✓ Start command sent for service ${name}`);
+      console.log('Use --wait flag to wait for completion or check status with: aci admin services status ' + name);
+    }
+    
+  } catch (error) {
+    handleError(error, `Failed to start service: ${name}`);
+  }
+}
+
+export async function stopServiceCommand(name: string, options: AdminCommandOptions): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    console.log(`Stopping service: ${name}...`);
+    
+    await client.stopService(name, options.wait);
+    
+    if (options.wait) {
+      console.log(`✓ Service ${name} stopped successfully`);
+    } else {
+      console.log(`✓ Stop command sent for service ${name}`);
+      console.log('Use --wait flag to wait for completion or check status with: aci admin services status ' + name);
+    }
+    
+  } catch (error) {
+    handleError(error, `Failed to stop service: ${name}`);
+  }
+}
+
+export async function restartServiceCommand(name: string, options: AdminCommandOptions): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    console.log(`Restarting service: ${name}...`);
+    
+    // Simple stop then start
+    await client.stopService(name, true);
+    console.log(`  ✓ Service ${name} stopped`);
+    
+    await client.startService(name, true);
+    console.log(`  ✓ Service ${name} started`);
+    
+    console.log(`✓ Service ${name} restarted successfully`);
+    
+  } catch (error) {
+    handleError(error, `Failed to restart service: ${name}`);
+  }
+}
+
+export async function viewLogsCommand(options: AdminCommandOptions): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    const tail = parseInt(options.tail?.toString() || '100');
+    console.log(`Fetching last ${tail} log entries${options.level ? ` (level: ${options.level})` : ''}...`);
+    
+    const logs = await client.getLogs(tail, options.level);
+    
+    if (logs.length === 0) {
+      console.log('No log entries found.');
+      return;
+    }
+    
+    logs.forEach(log => {
+      const timestamp = new Date(log.time).toISOString();
+      const level = log.level.padEnd(7);
+      console.log(`${timestamp} ${level} ${log.message}`);
+    });
+    
+    console.log(`\nShowing ${logs.length} log entries`);
+    
+  } catch (error) {
+    handleError(error, 'Failed to view logs');
+  }
+}
+
+export async function exportLogsCommand(options: AdminCommandOptions): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    console.log('Getting recent logs...');
+    
+    const logs = await client.getLogs(1000); // Simple: just get last 1000 entries
+    
+    if (logs.length === 0) {
+      console.log('No log entries found.');
+      return;
+    }
+    
+    logs.forEach(log => {
+      const timestamp = new Date(log.time).toISOString();
+      console.log(`${timestamp} [${log.level}] ${log.message}`);
+    });
+    
+    console.log(`\nShowing ${logs.length} log entries`);
+    
+  } catch (error) {
+    handleError(error, 'Failed to export logs');
+  }
+}
+
+export async function adminStatusCommand(options: AdminCommandOptions): Promise<void> {
+  try {
+    const session = await getAdminSession(options.env);
+    
+    if (!session) {
+      console.log('Not authenticated for admin operations');
+      console.log('Use: aci admin login --help');
+      return;
+    }
+    
+    console.log('Admin Session:');
+    console.log(`  Environment: ${session.environment}`);
+    console.log(`  Server: ${session.serverAdminUrl}`);
+    console.log(`  User: ${session.username || 'API Token User'}`);
+    
+    const expiresIn = Math.floor((session.elevationExpires - Date.now()) / 1000 / 60);
+    console.log(`  Expires in: ${expiresIn} minutes`);
+    
+  } catch (error) {
+    handleError(error, 'Failed to get admin status');
+  }
+}
+
+export async function healthCheckCommand(options: AdminCommandOptions): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    console.log('Checking server status...');
+    
+    // Simple health check: try to get services list
+    const services = await client.listServices();
+    const runningServices = services.filter(s => s.status === 'STARTED').length;
+    
+    console.log('Server Status:');
+    console.log(`  Total Services: ${services.length}`);
+    console.log(`  Running Services: ${runningServices}`);
+    console.log(`  Server: ${runningServices > 0 ? '✓ Healthy' : '⚠ No running services'}`);
+    
+  } catch (error) {
+    handleError(error, 'Failed to check server health');
+  }
+}
+
+// Admin Authentication Commands
+
+export async function adminLoginCommand(options: AdminCommandOptions & {
+  token?: string;
+  server?: string;
+  username?: string;
+}): Promise<void> {
+  try {
+    const environment = options.env || 'default';
+    
+    if (!options.server) {
+      console.error('Admin login requires --server URL');
+      console.log('Usage:');
+      console.log('  aci admin login --server https://server.com:6443/arcgis/admin --token YOUR_TOKEN');
+      console.log('  aci admin login --server https://server.com:6443/arcgis/admin --username admin');
+      process.exit(1);
+    }
+    
+    if (options.token) {
+      await authenticateWithToken(environment, options.server, options.token);
+    } else if (options.username) {
+      await authenticateWithUsername(environment, options.server, options.username);
+    } else {
+      console.error('Must specify either --token or --username');
+      process.exit(1);
+    }
+    
+  } catch (error) {
+    handleError(error, 'Admin login failed');
+  }
+}
+
+export async function adminLogoutCommand(options: AdminCommandOptions): Promise<void> {
+  try {
+    const { clearAdminSession } = await import('../session.js');
+    const environment = options.env || 'default';
+    
+    await clearAdminSession(environment);
+    console.log(`✓ Admin session cleared for environment: ${environment}`);
+    
+  } catch (error) {
+    handleError(error, 'Admin logout failed');
+  }
+}
+
+// Helper functions for authentication
+
+async function authenticateWithToken(
+  environment: string,
+  serverAdminUrl: string,
+  token: string
+): Promise<void> {
+  const { saveAdminSession, getAdminTimeout } = await import('../session.js');
+  
+  // Test the token by making a simple request
+  const response = await fetch(`${serverAdminUrl}/info?token=${token}&f=json`);
+  
+  if (!response.ok) {
+    throw new AdminAuthenticationError(`Server returned ${response.status}: ${response.statusText}`);
+  }
+  
+  const data = await response.json();
+  
+  if (data.error) {
+    throw new AdminAuthenticationError(`Authentication failed: ${data.error.message}`);
+  }
+  
+  // Create admin session
+  const adminSession: AdminSession = {
+    environment,
+    adminToken: token,
+    serverAdminUrl,
+    username: 'api-token-user',
+    elevationExpires: Date.now() + getAdminTimeout(environment),
+    authenticationMethod: 'TOKEN'
+  };
+  
+  await saveAdminSession(adminSession, environment);
+  
+  console.log(`✓ Admin authentication successful for environment: ${environment}`);
+  console.log(`Server: ${serverAdminUrl}`);
+}
+
+async function authenticateWithUsername(
+  environment: string,
+  serverAdminUrl: string,
+  username: string
+): Promise<void> {
+  const { read } = await import('read');
+  const { saveAdminSession, getAdminTimeout } = await import('../session.js');
+  
+  // Prompt for password
+  const password = await read({
+    prompt: 'Password: ',
+    silent: true
+  });
+  
+  // Generate token using username/password
+  const response = await fetch(`${serverAdminUrl}/generateToken`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: new URLSearchParams({
+      username,
+      password,
+      client: 'requestip',
+      f: 'json'
+    })
+  });
+  
+  if (!response.ok) {
+    throw new AdminAuthenticationError(`Server returned ${response.status}: ${response.statusText}`);
+  }
+  
+  const data = await response.json();
+  
+  if (data.error) {
+    throw new AdminAuthenticationError(`Authentication failed: ${data.error.message}`);
+  }
+  
+  if (!data.token) {
+    throw new AdminAuthenticationError('No token received from server');
+  }
+  
+  // Create admin session
+  const adminSession: AdminSession = {
+    environment,
+    adminToken: data.token,
+    serverAdminUrl,
+    username,
+    elevationExpires: data.expires || (Date.now() + getAdminTimeout(environment)),
+    authenticationMethod: 'TOKEN'
+  };
+  
+  await saveAdminSession(adminSession, environment);
+  
+  console.log(`✓ Admin authentication successful for environment: ${environment}`);
+  console.log(`Server: ${serverAdminUrl}`);
+  console.log(`User: ${username}`);
+}import { getSession, saveSession, clearSession, getPortalUrl, getCurrentEnvironment, listEnvironments } from '../session.js';
+import type { Environment } from '../session.js';
+import { UserSession } from '@esri/arcgis-rest-auth';
+import { handleError } from '../errors/handler.js';
+import { validateUrl, isEnterprisePortal, normalizeBasePortalUrl, buildSharingRestUrl } from '../services/validator.js';
+const read = require('read').read;
+
+/**
+ * Secure password prompt using the read library
+ */
+async function securePasswordPrompt(message: string): Promise<string> {
+  try {
+    const password = await read({ 
+      prompt: message, 
+      silent: true,
+      replace: '*'  // Show asterisks for visual feedback
+    });
+    return password;
+  } catch (err) {
+    if ((err as Error).message === 'canceled') {
+      throw new Error('Password input canceled');
+    }
+    throw err;
+  }
+}
+
+interface LoginOptions {
+  token?: string;
+  username?: string;
+  portal?: string;
+  env?: Environment;
+}
+
+export async function loginCommand(options: LoginOptions): Promise<void> {
+  try {
+    // Get portal URL from environment or explicit portal option
+    const inputPortal = options.portal || getPortalUrl(options.env);
+    const basePortalUrl = normalizeBasePortalUrl(inputPortal);
+    const sharingRestUrl = buildSharingRestUrl(basePortalUrl);
+    
+    const envName = options.env || getCurrentEnvironment();
+    console.log(`Environment: ${envName}`);
+    
+    if (inputPortal !== sharingRestUrl) {
+      console.log(`Normalized portal URL: ${inputPortal} → ${sharingRestUrl}`);
+    }
+    console.log(`Authenticating with portal: ${sharingRestUrl}`);
+    
+    // Validate portal URL
+    if (!validateUrl(sharingRestUrl)) {
+      throw new Error(`Invalid portal URL: ${sharingRestUrl}`);
+    }
+    
+    // Enterprise token-based authentication (primary)
+    if (options.token) {
+      await handleTokenLogin(sharingRestUrl, options.token, options.env);
+      return;
+    }
+    
+    // Username/password authentication (fallback)
+    if (options.username) {
+      await handleUsernameLogin(sharingRestUrl, basePortalUrl, options.username, options.env);
+      return;
+    }
+    
+    // Provide appropriate guidance based on portal type
+    if (isEnterprisePortal(sharingRestUrl)) {
+      showEnterpriseAuthInstructions(sharingRestUrl);
+    } else {
+      showArcGISOnlineInstructions();
+    }
+    
+  } catch (error) {
+    handleError(error, 'Authentication failed');
+  }
+}
+
+async function handleTokenLogin(sharingRestUrl: string, token: string, env?: Environment): Promise<void> {
+  console.log('Validating API token...');
+  
+  // Create session with token - let saveSession handle expiration
+  const basePortalUrl = normalizeBasePortalUrl(sharingRestUrl);
+  const session = new UserSession({
+    portal: basePortalUrl,
+    token
+  });
+  
+  try {
+    // Validate token by making a test request
+    await session.getUser();
+    await saveSession(session, env);
+    console.log('✓ Enterprise session established successfully');
+    console.log(`✓ Authenticated as: ${session.username || 'unknown user'}`);
+  } catch (error) {
+    throw new Error('Invalid token or portal unreachable. Please verify your token and portal URL.');
+  }
+}
+
+async function handleUsernameLogin(sharingRestUrl: string, basePortalUrl: string, username: string, env?: Environment): Promise<void> {
+  // Secure password prompt with masking
+  const password = await securePasswordPrompt('Enter password: ');
+  
+  console.log('Authenticating with username/password...');
+  
+  try {
+    console.log(`Attempting authentication with base portal: ${basePortalUrl}`);
+    
+    const session = new UserSession({
+      username,
+      password,
+      portal: basePortalUrl
+    });
+
+    // Trigger authentication by requesting a token
+    const token = await session.getToken(basePortalUrl);
+    
+    if (!token) {
+      throw new Error('No token received from portal');
+    }
+    
+    await saveSession(session, env);
+    console.log('✓ Authentication successful');
+    console.log(`✓ Authenticated as: ${username}`);
+    console.log(`✓ Token: ${token.substring(0, 20)}...`);
+    
+  } catch (error) {
+    // Fallback to manual token generation with corrected parameters
+    console.log('UserSession authentication failed, trying manual token generation...');
+    await fallbackTokenGeneration(sharingRestUrl, basePortalUrl, username, password, env);
+  }
+}
+
+async function fallbackTokenGeneration(sharingRestUrl: string, basePortalUrl: string, username: string, password: string, env?: Environment): Promise<void> {
+  try {
+    // Use the correct generateToken endpoint - use the full sharing/rest URL
+    const tokenUrl = `${sharingRestUrl}/generateToken`;
+    
+    console.log(`Trying manual token generation at: ${tokenUrl}`);
+    
+    const requestBody = new URLSearchParams({
+      username,
+      password,
+      expiration: '120', // 2 hours in minutes
+      referer: 'https://www.arcgis.com', // Use referer instead of client
+      f: 'json'
+    });
+    
+    console.log(`Request body params: ${Array.from(requestBody.entries()).map(([k,v]) => k === 'password' ? `${k}=***` : `${k}=${v}`).join(', ')}`);
+    
+    const response = await fetch(tokenUrl, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: requestBody
+    });
+
+    console.log(`Response status: ${response.status} ${response.statusText}`);
+    console.log(`Response headers: [Available]`);
+
+    if (!response.ok) {
+      const responseText = await response.text();
+      console.log(`Response body: ${responseText}`);
+      throw new Error(`HTTP error! status: ${response.status} ${response.statusText}`);
+    }
+
+    const responseText = await response.text();
+    console.log(`Raw response: ${responseText}`);
+    
+    const tokenData = JSON.parse(responseText);
+    console.log(`Parsed response:`, tokenData);
+    
+    if (tokenData.error) {
+      const error = tokenData.error;
+      let errorMsg = error.message || 'Unknown error';
+      
+      // Add specific error details if available
+      if (error.details && error.details.length > 0) {
+        errorMsg += `\nDetails: ${error.details.join(', ')}`;
+      }
+      
+      // Add error code if available
+      if (error.code) {
+        errorMsg += `\nError Code: ${error.code}`;
+      }
+      
+      // Provide specific guidance based on error type
+      if (error.code === 400) {
+        if (error.details?.some((d: any) => d.toLowerCase().includes('too many invalid logins'))) {
+          errorMsg += '\n\n⚠️  Account temporarily locked due to too many failed login attempts.';
+          errorMsg += '\n   Please wait a few minutes before trying again or contact your administrator.';
+        } else if (error.details?.some((d: any) => d.toLowerCase().includes('invalid credentials'))) {
+          errorMsg += '\n\n⚠️  Invalid username or password.';
+          errorMsg += '\n   Please verify your credentials and try again.';
+        }
+      }
+      
+      throw new Error(`Authentication failed: ${errorMsg}`);
+    }
+    
+    if (!tokenData.token) {
+      throw new Error('No token received from portal');
+    }
+    
+    // Create session with generated token
+    const session = new UserSession({
+      portal: basePortalUrl,
+      token: tokenData.token,
+      username,
+      tokenExpires: new Date(tokenData.expires || Date.now() + 7200000) // 2 hours default
+    });
+    
+    await saveSession(session, env);
+    console.log('✓ Manual token generation successful');
+    console.log(`✓ Authenticated as: ${username}`);
+    console.log(`✓ Token expires: ${session.tokenExpires.toLocaleString()}`);
+    
+  } catch (error) {
+    // Re-throw authentication errors as-is (they're already well formatted)
+    if ((error as Error).message.startsWith('Authentication failed:')) {
+      throw error;
+    }
+    throw new Error(`Manual token generation failed: ${(error as Error).message}`);
+  }
+}
+
+function showEnterpriseAuthInstructions(portal: string): void {
+  // Use the same normalization logic as the rest of the app
+  const basePortal = normalizeBasePortalUrl(portal);
+  
+  console.log('');
+  console.log('Enterprise Authentication Options:');
+  console.log('');
+  console.log('Option 1: Username/Password Authentication');
+  console.log(`   arc login --portal ${portal} --username YOUR_USERNAME`);
+  console.log('');
+  console.log('Option 2: API Token Authentication');
+  console.log('1. Access your portal:');
+  console.log(`   ${basePortal}/home/user.html`);
+  console.log('2. Navigate to "My Settings" > "Developer Settings"');
+  console.log('3. Generate a new API Token with appropriate privileges');
+  console.log('4. Run the following command:');
+  console.log(`   arc login --portal ${portal} --token YOUR_API_TOKEN`);
+  console.log('');
+  console.log('Note: Username/password auth automatically generates a token via:');
+  console.log(`   ${portal}/generateToken`);
+  console.log('');
+}
+
+function showArcGISOnlineInstructions(): void {
+  console.log('');
+  console.log('ArcGIS Online Authentication:');
+  console.log('OAuth2 flow will be available in a future update.');
+  console.log('');
+  console.log('For now, use manual token authentication:');
+  console.log('1. Go to https://developers.arcgis.com/sign-in/');
+  console.log('2. Sign in to your ArcGIS account');
+  console.log('3. Generate a token');
+  console.log('4. Run: arc login --token <your-token>');
+  console.log('');
+}
+
+interface LogoutOptions {
+  env?: Environment;
+  all?: boolean;
+}
+
+export async function logoutCommand(options: LogoutOptions = {}): Promise<void> {
+  try {
+    if (options.all) {
+      // Import the function we need
+      const { clearAllSessions } = await import('../session.js');
+      await clearAllSessions();
+      console.log('Successfully logged out from all environments');
+    } else {
+      await clearSession(options.env);
+      const envName = options.env || getCurrentEnvironment();
+      console.log(`Successfully logged out from environment: ${envName}`);
+    }
+  } catch (error) {
+    handleError(error, 'Logout failed');
+  }
+}
+
+// New command to show current environment status
+export async function statusCommand(): Promise<void> {
+  try {
+    const currentEnv = getCurrentEnvironment();
+    const session = await getSession();
+    
+    console.log(`Current environment: ${currentEnv}`);
+    
+    if (session) {
+      console.log(`Authenticated as: ${session.username || 'API Token User'}`);
+      console.log(`Portal: ${session.portal}`);
+      
+      // Check token expiration
+      if (session.tokenExpires) {
+        const remaining = session.tokenExpires.getTime() - Date.now();
+        const minutes = Math.floor(remaining / 60000);
+        console.log(`Token expires in: ${minutes} minutes`);
+      }
+    } else {
+      console.log('Not authenticated');
+    }
+    
+    // Show all available environments
+    const envs = listEnvironments();
+    console.log('\nAvailable environments:');
+    Object.entries(envs).forEach(([name, portal]) => {
+      const marker = name === currentEnv ? ' (current)' : '';
+      console.log(`  ${name}: ${portal}${marker}`);
+    });
+  } catch (error) {
+    handleError(error, 'Status check failed');
+  }
+}/**
+ * Data Store Management Commands
+ * Phase 1: Core diagnostic operations only
+ */
+
+import { ArcGISServerAdminClient } from '../services/admin-client.js';
+import { requireAdminSession } from '../session.js';
+import { handleError } from '../errors/handler.js';
+import { 
+  formatDatastoreList, 
+  formatHealthReport, 
+  formatMachineList, 
+  formatBackupStatus,
+  formatDatastoreError 
+} from '../utils/datastore-output.js';
+import type { 
+  DataStoreConnectionError, 
+  DataStoreNotFoundError,
+  DataStoreTimeoutError 
+} from '../errors/datastore-errors.js';
+
+export interface DatastoreCommandOptions {
+  detailed?: boolean;
+  timeout?: string;
+  env?: string;
+}
+
+/**
+ * List all registered data stores
+ */
+export async function listDatastoresCommand(options: DatastoreCommandOptions): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    console.log('Retrieving data store information...');
+    const stores = await client.listDatastores();
+    
+    console.log(formatDatastoreList(stores));
+    
+  } catch (error) {
+    handleError(error as Error, 'Failed to list data stores');
+  }
+}
+
+/**
+ * Validate health of a specific data store
+ */
+export async function validateDatastoreCommand(
+  name: string, 
+  options: DatastoreCommandOptions
+): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    console.log(`Validating data store: ${name}...`);
+    
+    const timeoutMs = options.timeout ? parseInt(options.timeout) * 1000 : undefined;
+    const healthReport = await client.validateDatastore(name, { timeout: timeoutMs });
+    
+    console.log(formatHealthReport(healthReport, options.detailed));
+    
+  } catch (error) {
+    if (error instanceof Error) {
+      // Handle specific datastore errors with context
+      if (error.name === 'DataStoreNotFoundError') {
+        console.error(`Data store '${name}' not found`);
+        console.error('• Check name spelling - Use: aci admin datastores list');
+        console.error('• Verify registration - Ensure data store is registered with server');
+        process.exit(1);
+      }
+      
+      if (error.name === 'DataStoreTimeoutError') {
+        const timeoutError = error as DataStoreTimeoutError;
+        console.error(`Validation timeout after ${timeoutError.timeoutMs}ms`);
+        console.error(`• Increase timeout - Use: --timeout ${Math.ceil(timeoutError.timeoutMs / 1000) + 30}`);
+        console.error('• Check connectivity - Verify network access to datastore machines');
+        console.error('• Check datastore health - Datastore may be experiencing issues');
+        process.exit(1);
+      }
+      
+      if (error.name === 'DataStoreConnectionError') {
+        const connError = error as DataStoreConnectionError;
+        console.error(`Connection failed for data store '${name}': ${connError.message}`);
+        connError.recoveryActions.forEach(action => console.error(`• ${action}`));
+        process.exit(1);
+      }
+    }
+    
+    handleError(error as Error, `Failed to validate data store '${name}'`);
+  }
+}
+
+/**
+ * Show machine status for a specific data store
+ */
+export async function machinesCommand(
+  name: string, 
+  options: DatastoreCommandOptions
+): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    console.log(`Retrieving machine information for: ${name}...`);
+    const machines = await client.getDataStoreMachines(name);
+    
+    console.log(formatMachineList(name, machines));
+    
+  } catch (error) {
+    if (error instanceof Error && error.name === 'DataStoreNotFoundError') {
+      console.error(`Data store '${name}' not found`);
+      console.error('• Check name spelling - Use: aci admin datastores list');
+      console.error('• Verify registration - Ensure data store is registered with server');
+      process.exit(1);
+    }
+    
+    handleError(error as Error, `Failed to get machines for data store '${name}'`);
+  }
+}
+
+/**
+ * Show backup information across all data stores
+ */
+export async function backupInfoCommand(options: DatastoreCommandOptions): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    console.log('Retrieving backup information...');
+    const backupStatus = await client.getBackupInfo();
+    
+    console.log(formatBackupStatus(backupStatus));
+    
+  } catch (error) {
+    handleError(error as Error, 'Failed to get backup information');
+  }
+}import { getSession } from '../session.js';
+import type { Environment } from '../session.js';
+import { detectServiceType, validateUrl } from '../services/validator.js';
+import { getServiceInfo, getLayerInfo } from '../services/arcgis-client.js';
+import { getFederatedToken, isServerFederated } from '../services/federation.js';
+import { handleError } from '../errors/handler.js';
+import { formatOutput } from '../utils/output.js';
+import { resolveServiceDatastore } from '../services/datastore-resolver.js';
+import type { UnifiedInspectionReport, ServiceMetadata, InfrastructureAnalysis } from '../types/unified-report.js';
+
+interface InspectOptions {
+  json?: boolean;
+  fields?: boolean;
+  env?: Environment;
+  withInfrastructure?: boolean;
+  troubleshoot?: boolean;
+  complianceReport?: boolean;
+}
+
+export async function inspectCommand(url: string, options: InspectOptions): Promise<void> {
+  try {
+    // Validate URL
+    if (!validateUrl(url)) {
+      throw new Error(`Invalid URL: ${url}`);
+    }
+    
+    // Detect service type
+    const serviceType = detectServiceType(url);
+    console.log(`Detected service type: ${serviceType}`);
+    
+    // Get session for authentication (optional for public services)
+    const session = await getSession(options.env);
+    console.log(session ? `Using authenticated session for ${session.username}` : 'Attempting unauthenticated request...');
+    
+    // Handle federated authentication for ArcGIS Server (only if authenticated)
+    let authSession = session;
+    
+    if (session) {
+      const serverUrl = new URL(url).origin;
+      
+      // Check if this is a different server that might need federation
+      if (serverUrl !== new URL(session.portal).origin) {
+        const isFederated = await isServerFederated(session.portal, serverUrl);
+        if (isFederated) {
+          console.log(`Obtaining federated token for ${serverUrl}...`);
+          try {
+            const federatedToken = await getFederatedToken(session, serverUrl);
+            // Create a new session with the federated token for this server
+            authSession = new (session.constructor as any)({
+              portal: session.portal,
+              token: federatedToken,
+              tokenExpires: session.tokenExpires,
+              username: session.username
+            });
+          } catch (error) {
+            console.warn(`Federation failed, using portal token: ${(error as Error).message}`);
+          }
+        }
+      }
+    }
+    
+    // Get service information
+    let serviceInfo;
+    switch (serviceType) {
+      case 'feature-service':
+      case 'map-service':
+        serviceInfo = await getServiceInfo(url, authSession || undefined);
+        break;
+      case 'feature-layer':
+      case 'map-layer':
+        // For layers, get the specific layer information which includes fields
+        const layerMatch = url.match(/\/(\d+)$/);
+        if (layerMatch && layerMatch[1]) {
+          const layerId = parseInt(layerMatch[1], 10);
+          const serviceUrl = url.replace(/\/\d+$/, '');
+          serviceInfo = await getLayerInfo(serviceUrl, layerId, authSession || undefined);
+        } else {
+          serviceInfo = await getServiceInfo(url, authSession || undefined);
+        }
+        break;
+      default:
+        throw new Error(`Service type "${serviceType}" not yet supported`);
+    }
+    
+    // Check if infrastructure analysis is requested
+    if (options.withInfrastructure || options.troubleshoot || options.complianceReport) {
+      const report = await generateUnifiedReport(url, serviceInfo, options);
+      displayUnifiedReport(report, options);
+    } else {
+      // Standard service inspection output
+      if (options.json) {
+        console.log(JSON.stringify(serviceInfo, null, 2));
+      } else {
+        formatOutput(serviceInfo, { showFields: options.fields });
+      }
+    }
+    
+  } catch (error) {
+    handleError(error, 'Service inspection failed');
+  }
+}
+
+/**
+ * Generate unified report combining service and infrastructure analysis
+ */
+async function generateUnifiedReport(
+  url: string,
+  serviceInfo: any,
+  options: InspectOptions
+): Promise<UnifiedInspectionReport> {
+  console.log('Analyzing service and infrastructure correlation...');
+  
+  // Convert service info to standardized metadata
+  const serviceMetadata: ServiceMetadata = {
+    name: serviceInfo.name || serviceInfo.mapName || 'Unknown Service',
+    type: serviceInfo.type || 'Unknown',
+    url: url,
+    description: serviceInfo.description,
+    capabilities: serviceInfo.capabilities?.split(','),
+    spatialReference: serviceInfo.spatialReference,
+    extent: serviceInfo.fullExtent || serviceInfo.extent,
+    fields: serviceInfo.fields,
+    relationships: serviceInfo.relationships,
+    lastEditDate: serviceInfo.editingInfo?.lastEditDate,
+    maxRecordCount: serviceInfo.maxRecordCount,
+    supportedQueryFormats: serviceInfo.supportedQueryFormats,
+    hasStaticData: serviceInfo.hasStaticData
+  };
+
+  // Determine analysis type
+  let analysisType: UnifiedInspectionReport['analysisType'] = 'basic';
+  if (options.complianceReport) analysisType = 'compliance';
+  else if (options.troubleshoot) analysisType = 'troubleshoot';
+  else if (options.withInfrastructure) analysisType = 'with-infrastructure';
+
+  const report: UnifiedInspectionReport = {
+    service: serviceMetadata,
+    reportGenerated: new Date().toISOString(),
+    analysisType,
+    summary: {
+      overallStatus: 'healthy',
+      keyFindings: [],
+      actionItems: []
+    }
+  };
+
+  // Add infrastructure analysis if admin session available
+  try {
+    const correlation = await resolveServiceDatastore(url, options.env);
+    
+    if (correlation.backingDatastore) {
+      console.log(`✓ Found backing datastore: ${correlation.backingDatastore.name} (${correlation.correlationConfidence} confidence)`);
+      
+      const infrastructureAnalysis: InfrastructureAnalysis = {
+        correlation: {
+          method: correlation.correlationMethod,
+          confidence: correlation.correlationConfidence,
+          reasoning: getCorrelationReasoning(correlation)
+        },
+        datastore: correlation.backingDatastore,
+        recommendations: [],
+        alerts: []
+      };
+
+      // Try to get detailed health if admin access available
+      try {
+        const { ArcGISServerAdminClient } = await import('../services/admin-client.js');
+        const { getAdminSession } = await import('../session.js');
+        
+        const adminSession = await getAdminSession(options.env);
+        if (adminSession) {
+          const adminClient = new ArcGISServerAdminClient(adminSession);
+          const healthReport = await adminClient.validateDatastore(correlation.backingDatastore.name);
+          infrastructureAnalysis.health = healthReport;
+          
+          console.log(`✓ Infrastructure health: ${healthReport.status}`);
+        }
+      } catch (error) {
+        infrastructureAnalysis.alerts.push({
+          severity: 'info',
+          message: 'Admin access not available for detailed health analysis',
+          action: 'Use: aci admin login for infrastructure health details'
+        });
+      }
+
+      // Generate recommendations based on analysis type
+      generateRecommendations(infrastructureAnalysis, analysisType);
+      
+      report.infrastructure = infrastructureAnalysis;
+    } else {
+      console.log('⚠ Could not correlate service with backing datastore');
+      report.summary.keyFindings.push('Backing datastore could not be identified');
+      report.summary.actionItems.push('Verify service registration and datastore connectivity');
+    }
+  } catch (error) {
+    console.log(`⚠ Infrastructure analysis failed: ${(error as Error).message}`);
+    report.summary.keyFindings.push('Infrastructure analysis unavailable');
+  }
+
+  // Update overall status based on findings
+  updateOverallStatus(report);
+
+  return report;
+}
+
+/**
+ * Get human-readable correlation reasoning
+ */
+function getCorrelationReasoning(correlation: any): string {
+  switch (correlation.correlationMethod) {
+    case 'direct':
+      return 'Correlated through admin API cross-reference';
+    case 'heuristic':
+      return 'Correlated using service metadata and naming patterns';
+    default:
+      return 'Correlation method unknown';
+  }
+}
+
+/**
+ * Generate recommendations based on analysis
+ */
+function generateRecommendations(analysis: InfrastructureAnalysis, analysisType: string): void {
+  if (!analysis.datastore) return;
+
+  // Basic infrastructure recommendations
+  if (analysis.datastore.status === 'HealthyWithWarning') {
+    analysis.recommendations.push('Monitor datastore warnings and plan maintenance');
+    analysis.alerts.push({
+      severity: 'warning',
+      message: 'Backing datastore shows warnings',
+      action: `Use: aci admin datastores validate ${analysis.datastore.name} --detailed`
+    });
+  }
+
+  if (analysis.datastore.status === 'Unhealthy') {
+    analysis.recommendations.push('Immediate attention required for backing datastore');
+    analysis.alerts.push({
+      severity: 'error',
+      message: 'Backing datastore is unhealthy',
+      action: `Use: aci admin datastores validate ${analysis.datastore.name} --detailed`
+    });
+  }
+
+  // Analysis type specific recommendations
+  if (analysisType === 'troubleshoot') {
+    analysis.recommendations.push('Check service performance metrics');
+    analysis.recommendations.push('Verify datastore machine health and replication status');
+    analysis.recommendations.push('Review recent logs for errors or warnings');
+  }
+
+  if (analysisType === 'compliance') {
+    analysis.recommendations.push('Verify backup schedule compliance');
+    analysis.recommendations.push('Document service-to-datastore mapping');
+    analysis.recommendations.push('Validate data governance policies');
+  }
+}
+
+/**
+ * Update overall status based on analysis
+ */
+function updateOverallStatus(report: UnifiedInspectionReport): void {
+  if (report.infrastructure?.health?.status === 'Unhealthy') {
+    report.summary.overallStatus = 'error';
+  } else if (report.infrastructure?.health?.status === 'HealthyWithWarning') {
+    report.summary.overallStatus = 'warning';
+  } else {
+    report.summary.overallStatus = 'healthy';
+  }
+
+  // Generate key findings summary
+  if (report.infrastructure?.datastore) {
+    report.summary.keyFindings.push(`Backed by ${report.infrastructure.datastore.type} datastore: ${report.infrastructure.datastore.name}`);
+  }
+
+  if (report.infrastructure?.health) {
+    report.summary.keyFindings.push(`Infrastructure status: ${report.infrastructure.health.status}`);
+  }
+}
+
+/**
+ * Display unified report in appropriate format
+ */
+function displayUnifiedReport(report: UnifiedInspectionReport, options: InspectOptions): void {
+  if (options.json) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+
+  // Format unified report output
+  console.log('\n' + '='.repeat(60));
+  console.log(`UNIFIED INSPECTION REPORT - ${report.analysisType.toUpperCase()}`);
+  console.log('='.repeat(60));
+  
+  // Service Information
+  console.log('\n📋 SERVICE INFORMATION');
+  console.log(`Name: ${report.service.name}`);
+  console.log(`Type: ${report.service.type}`);
+  console.log(`URL: ${report.service.url}`);
+  if (report.service.description) {
+    console.log(`Description: ${report.service.description}`);
+  }
+
+  // Infrastructure Analysis
+  if (report.infrastructure) {
+    console.log('\n🏗️ INFRASTRUCTURE ANALYSIS');
+    console.log(`Correlation: ${report.infrastructure.correlation.method} (${report.infrastructure.correlation.confidence} confidence)`);
+    console.log(`Reasoning: ${report.infrastructure.correlation.reasoning}`);
+    
+    if (report.infrastructure.datastore) {
+      console.log(`Backing Datastore: ${report.infrastructure.datastore.name}`);
+      console.log(`Datastore Type: ${report.infrastructure.datastore.type}`);
+      console.log(`Status: ${formatStatus(report.infrastructure.datastore.status)}`);
+    }
+
+    if (report.infrastructure.health) {
+      console.log(`Health Status: ${formatStatus(report.infrastructure.health.status)}`);
+      console.log(`Machines: ${report.infrastructure.health.machines.length}`);
+      console.log(`Last Validated: ${formatTimestamp(report.infrastructure.health.lastValidated)}`);
+    }
+  }
+
+  // Summary
+  console.log('\n📊 SUMMARY');
+  console.log(`Overall Status: ${formatStatus(report.summary.overallStatus)}`);
+  
+  if (report.summary.keyFindings.length > 0) {
+    console.log('\nKey Findings:');
+    report.summary.keyFindings.forEach(finding => console.log(`• ${finding}`));
+  }
+
+  // Recommendations
+  if (report.infrastructure?.recommendations && report.infrastructure.recommendations.length > 0) {
+    console.log('\n💡 RECOMMENDATIONS');
+    report.infrastructure.recommendations.forEach(rec => console.log(`• ${rec}`));
+  }
+
+  // Alerts
+  if (report.infrastructure?.alerts && report.infrastructure.alerts.length > 0) {
+    console.log('\n⚠️ ALERTS');
+    report.infrastructure.alerts.forEach(alert => {
+      const icon = alert.severity === 'error' ? '🔴' : alert.severity === 'warning' ? '🟡' : 'ℹ️';
+      console.log(`${icon} ${alert.message}`);
+      if (alert.action) {
+        console.log(`   Action: ${alert.action}`);
+      }
+    });
+  }
+
+  console.log(`\nReport generated: ${formatTimestamp(report.reportGenerated)}`);
+}
+
+/**
+ * Format status with color coding
+ */
+function formatStatus(status: string): string {
+  switch (status.toLowerCase()) {
+    case 'healthy':
+      return '\x1b[32m✓ Healthy\x1b[0m';
+    case 'warning':
+    case 'healthywithwarning':
+      return '\x1b[33m⚠ Warning\x1b[0m';
+    case 'error':
+    case 'unhealthy':
+      return '\x1b[31m✗ Error\x1b[0m';
+    default:
+      return status;
+  }
+}
+
+/**
+ * Format timestamp for display
+ */
+function formatTimestamp(timestamp: string): string {
+  try {
+    return new Date(timestamp).toLocaleString();
+  } catch (error) {
+    return timestamp;
+  }
+}import { getSession } from '../session.js';
+import type { Environment } from '../session.js';
+import { detectServiceType, validateUrl } from '../services/validator.js';
+import { queryFeatures } from '../services/arcgis-client.js';
+import { getFederatedToken, isServerFederated } from '../services/federation.js';
+import { handleError } from '../errors/handler.js';
+import { formatQueryResults } from '../utils/output.js';
+import type { IQueryFeaturesResponse, IQueryResponse, IFeature } from '@esri/arcgis-rest-feature-service';
+
+interface QueryOptions {
+  where?: string;
+  limit?: string;
+  fields?: string;
+  json?: boolean;
+  geojson?: boolean;
+  env?: Environment;
+}
+
+export async function queryCommand(url: string, options: QueryOptions): Promise<void> {
+  try {
+    // Validate URL
+    if (!validateUrl(url)) {
+      throw new Error(`Invalid URL: ${url}`);
+    }
+    
+    // Detect service type
+    const serviceType = detectServiceType(url);
+    if (!serviceType.includes('feature')) {
+      throw new Error(`Cannot query service type "${serviceType}". Only feature services support querying.`);
+    }
+    
+    // Get session for authentication (optional for public services)
+    const session = await getSession(options.env);
+    console.log(session ? `Using authenticated session for ${session.username}` : 'Attempting unauthenticated request...');
+    
+    // Handle federated authentication for ArcGIS Server (only if authenticated)
+    let authSession = session;
+    
+    if (session) {
+      const serverUrl = new URL(url).origin;
+      
+      // Check if this is a different server that might need federation
+      if (serverUrl !== new URL(session.portal).origin) {
+        const isFederated = await isServerFederated(session.portal, serverUrl);
+        if (isFederated) {
+          console.log(`Obtaining federated token for ${serverUrl}...`);
+          try {
+            const federatedToken = await getFederatedToken(session, serverUrl);
+            // Create a new session with the federated token for this server
+            authSession = new (session.constructor as any)({
+              portal: session.portal,
+              token: federatedToken,
+              tokenExpires: session.tokenExpires,
+              username: session.username
+            });
+          } catch (error) {
+            console.warn(`Federation failed, using portal token: ${(error as Error).message}`);
+          }
+        }
+      }
+    }
+    
+    // Parse options
+    const whereClause = options.where || '1=1';
+    const limit = options.limit ? parseInt(options.limit, 10) : 10;
+    const outFields = options.fields ? options.fields.split(',').map(f => f.trim()) : ['*'];
+    
+    console.log(`Querying: ${url}`);
+    console.log(`WHERE: ${whereClause}`);
+    console.log(`LIMIT: ${limit}`);
+    console.log(`FIELDS: ${outFields.join(', ')}`);
+    console.log('');
+    
+    // Execute query
+    const results = await queryFeatures(url, {
+      where: whereClause,
+      outFields,
+      resultRecordCount: limit
+    }, authSession || undefined);
+    
+    // Format and display results
+    if (options.json) {
+      console.log(JSON.stringify(results, null, 2));
+    } else if (options.geojson) {
+      if ('features' in results) {
+        const features: IFeature[] = results.features;
+        const geojson = {
+          type: 'FeatureCollection',
+          features: features.map((feature: IFeature) => ({
+            type: 'Feature',
+            geometry: feature.geometry,
+            properties: feature.attributes
+          }))
+        };
+        console.log(JSON.stringify(geojson, null, 2));
+      } else {
+        console.error('No features in response - query may have returned metadata only');
+      }
+    } else {
+      formatQueryResults(results);
+    }
+    
+  } catch (error) {
+    handleError(error, 'Query failed');
+  }
+}import { Command } from 'commander';
+import { loginCommand, logoutCommand, statusCommand } from './auth.js';
+import { inspectCommand } from './inspect.js';
+import { queryCommand } from './query.js';
+import { searchCommand } from './search.js';
+import { registerAdminCommands } from './admin.js';
+
+export function registerCommands(program: Command): void {
+  // Authentication commands
+  program
+    .command('login')
+    .description('Authenticate with ArcGIS portal')
+    .option('-t, --token <token>', 'API token for authentication (enterprise preferred)')
+    .option('-u, --username <username>', 'Username for authentication')
+    .option('-p, --portal <url>', 'Portal URL (required for enterprise)')
+    .option('-e, --env <environment>', 'Target environment (dev/qa/prod)')
+    .action(loginCommand);
+
+  program
+    .command('logout')
+    .description('Clear authentication session')
+    .option('-e, --env <environment>', 'Target environment to logout from')
+    .option('--all', 'Logout from all environments')
+    .action(logoutCommand);
+    
+  program
+    .command('status')
+    .description('Show authentication status and environment info')
+    .action(statusCommand);
+
+  // Inspection commands
+  program
+    .command('inspect')
+    .description('Inspect service or item metadata')
+    .argument('<url>', 'Service URL or item ID to inspect')
+    .option('--json', 'Output raw JSON')
+    .option('--fields', 'Show field schema details')
+    .option('--with-infrastructure', 'Include backing datastore analysis')
+    .option('--troubleshoot', 'Generate troubleshooting report with infrastructure correlation')
+    .option('--compliance-report', 'Generate compliance report with data governance analysis')
+    .option('-e, --env <environment>', 'Use specific environment for authentication')
+    .action(inspectCommand);
+
+  // Query commands
+  program
+    .command('query')
+    .description('Query features from a service')
+    .argument('<url>', 'Feature service URL to query')
+    .option('-w, --where <clause>', 'SQL WHERE clause', '1=1')
+    .option('-l, --limit <number>', 'Maximum number of features', '10')
+    .option('--fields <fields>', 'Comma-separated field names (default: all)')
+    .option('--json', 'Output raw JSON')
+    .option('--geojson', 'Output as GeoJSON')
+    .option('-e, --env <environment>', 'Use specific environment for authentication')
+    .action(queryCommand);
+
+  // Search commands
+  program
+    .command('search')
+    .description('Search portal items')
+    .argument('<query>', 'Search query string')
+    .option('-t, --type <type>', 'Filter by item type (e.g., "Feature Service", "Web Map")')
+    .option('-o, --owner <owner>', 'Filter by owner username')
+    .option('-l, --limit <number>', 'Maximum number of results', '10')
+    .option('--json', 'Output raw JSON')
+    .option('-e, --env <environment>', 'Use specific environment for authentication')
+    .action(searchCommand);
+
+  // Admin commands
+  registerAdminCommands(program);
+}import { getSession } from '../session.js';
+import type { Environment } from '../session.js';
+import { searchItems } from '@esri/arcgis-rest-portal';
+import { handleError } from '../errors/handler.js';
+import type { ISearchResult, IItem } from '@esri/arcgis-rest-portal';
+import type { UserSession } from '@esri/arcgis-rest-auth';
+
+interface SearchOptions {
+  type?: string;
+  owner?: string;
+  limit?: string;
+  json?: boolean;
+  env?: Environment;
+}
+
+export async function searchCommand(query: string, options: SearchOptions): Promise<void> {
+  try {
+    // Get session for authentication
+    const session = await getSession(options.env);
+    if (!session) {
+      const envName = options.env || 'current environment';
+      throw new Error(`Not authenticated in ${envName}. Please run "arc login --env ${options.env || 'default'}" first.`);
+    }
+    
+    console.log(`Searching portal for: "${query}"`);
+    console.log(`Portal: ${session.portal}`);
+    
+    // Check if we're in Node.js environment
+    const isNodeEnvironment = typeof window === 'undefined';
+    
+    if (isNodeEnvironment) {
+      // Use direct fetch in Node.js to avoid CORS-related browser functions
+      const results = await directSearchFetch(query, options, session);
+      
+      if (options.json) {
+        console.log(JSON.stringify(results, null, 2));
+      } else {
+        formatSearchResults(results);
+      }
+    } else {
+      // Use ArcGIS REST JS for browser compatibility
+      const searchOptions: any = {
+        q: query,
+        num: parseInt(options.limit || '10'),
+        authentication: session
+      };
+      
+      // Add type filter if specified
+      if (options.type) {
+        searchOptions.q += ` type:"${options.type}"`;
+      }
+      
+      // Add owner filter if specified
+      if (options.owner) {
+        searchOptions.q += ` owner:${options.owner}`;
+      }
+      
+      console.log(`Search query: ${searchOptions.q}`);
+      
+      const results: ISearchResult<IItem> = await searchItems(searchOptions);
+      
+      if (options.json) {
+        console.log(JSON.stringify(results, null, 2));
+      } else {
+        formatSearchResults(results);
+      }
+    }
+    
+  } catch (error) {
+    handleError(error, 'Portal search failed');
+  }
+}
+
+// Direct fetch fallback for when ArcGIS REST JS has issues
+async function directSearchFetch(query: string, options: SearchOptions, session: UserSession): Promise<ISearchResult<IItem>> {
+  // Ensure we use the correct portal URL structure
+  let portalBaseUrl = session.portal;
+  if (!portalBaseUrl.includes('/sharing/rest')) {
+    portalBaseUrl = `${portalBaseUrl}/portal/sharing/rest`;
+  }
+  
+  const searchUrl = new URL(`${portalBaseUrl}/search`);
+  
+  // Build query string
+  let searchQuery = query;
+  
+  // Add type filter if specified
+  if (options.type) {
+    searchQuery += ` type:"${options.type}"`;
+  }
+  
+  // Add owner filter if specified
+  if (options.owner) {
+    searchQuery += ` owner:${options.owner}`;
+  }
+  
+  console.log(`Search query: ${searchQuery}`);
+  
+  // Set search parameters
+  searchUrl.searchParams.set('q', searchQuery);
+  searchUrl.searchParams.set('f', 'json');
+  searchUrl.searchParams.set('num', options.limit || '10');
+  searchUrl.searchParams.set('start', '1');
+  
+  // Add token for authentication
+  if (session.token) {
+    searchUrl.searchParams.set('token', session.token);
+  }
+  
+  const response = await fetch(searchUrl.toString());
+  
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+  
+  const results = await response.json();
+  
+  if (results.error) {
+    throw new Error(`Search failed: ${results.error.message}`);
+  }
+  
+  return results;
+}
+
+function formatSearchResults(results: ISearchResult<IItem>): void {
+  console.log(`\n=== Search Results ===`);
+  console.log(`Found ${results.total} items (showing ${results.results.length})`);
+  console.log('');
+  
+  if (results.results.length === 0) {
+    console.log('No items found');
+    return;
+  }
+  
+  results.results.forEach((item: IItem, index: number) => {
+    console.log(`${index + 1}. ${item.title}`);
+    console.log(`   Type: ${item.type}`);
+    console.log(`   Owner: ${item.owner}`);
+    if (item.snippet) {
+      console.log(`   Description: ${item.snippet}`);
+    }
+    if (item.url) {
+      console.log(`   URL: ${item.url}`);
+    }
+    console.log(`   ID: ${item.id}`);
+    console.log(`   Modified: ${new Date(item.modified).toLocaleDateString()}`);
+    console.log('');
+  });
+  
+  if (results.total > results.results.length) {
+    console.log(`... and ${results.total - results.results.length} more items`);
+    console.log('Use --limit to see more results');
+  }
+}

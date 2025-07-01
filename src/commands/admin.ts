@@ -5,6 +5,12 @@ import { ArcGISServerAdminClient } from '../services/admin-client.js';
 import { handleError } from '../errors/handler.js';
 import { AdminAuthenticationError, InsufficientPrivilegesError } from '../error.js';
 import { formatServiceTable, formatServiceStatus } from '../utils/output.js';
+import { 
+  listDatastoresCommand, 
+  validateDatastoreCommand, 
+  machinesCommand, 
+  backupInfoCommand 
+} from './datastores.js';
 
 export interface AdminCommandOptions {
   env?: string;
@@ -53,6 +59,9 @@ export function registerAdminCommands(program: Command): void {
   
   // Status and health
   registerStatusCommands(adminCmd);
+  
+  // Data store management
+  registerDatastoreCommands(adminCmd);
 }
 
 /**
@@ -160,6 +169,41 @@ function registerStatusCommands(adminCmd: Command): void {
     .option('--detailed', 'Show detailed health information')
     .option('--env <environment>', 'Environment to use')
     .action(healthCheckCommand);
+}
+
+/**
+ * Register data store management commands
+ */
+function registerDatastoreCommands(adminCmd: Command): void {
+  const datastoresCmd = adminCmd
+    .command('datastores')
+    .description('Data store management operations');
+
+  datastoresCmd
+    .command('list')
+    .description('List registered data stores')
+    .option('--env <environment>', 'Environment to use')
+    .action(listDatastoresCommand);
+
+  datastoresCmd
+    .command('validate <name>')
+    .description('Validate health of a specific data store')
+    .option('--detailed', 'Show detailed health information')
+    .option('--timeout <seconds>', 'Validation timeout in seconds')
+    .option('--env <environment>', 'Environment to use')
+    .action(validateDatastoreCommand);
+
+  datastoresCmd
+    .command('machines <name>')
+    .description('Show machine status for data store')
+    .option('--env <environment>', 'Environment to use')
+    .action(machinesCommand);
+
+  datastoresCmd
+    .command('backup-info')
+    .description('Show backup status across all data stores')
+    .option('--env <environment>', 'Environment to use')
+    .action(backupInfoCommand);
 }
 
 // Command Implementations
