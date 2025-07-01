@@ -1,0 +1,33 @@
+{
+  "name": "aci",
+  "version": "0.1.0",
+  "description": "ArcGIS Command Line Interface - TypeScript CLI tool for interacting with ArcGIS ecosystem",
+  "type": "module",
+  "private": true,
+  "main": "dist/cli.js",
+  "bin": {
+    "aci": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "bun build src/cli.ts --outdir dist --target node --format esm",
+    "dev": "bun run src/cli.ts",
+    "start": "node dist/cli.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/node": "^24.0.8"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@esri/arcgis-rest-auth": "^3.8.0",
+    "@esri/arcgis-rest-feature-service": "^4.1.0",
+    "@esri/arcgis-rest-portal": "^4.6.1",
+    "@esri/arcgis-rest-request": "^4.6.0",
+    "commander": "^14.0.0",
+    "keytar": "^7.9.0",
+    "read": "^4.1.0"
+  }
+}
