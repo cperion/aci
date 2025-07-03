@@ -10,6 +10,8 @@ import { SelectionBar } from '../SelectionBar.js';
 import { ModeIndicator } from '../ModeIndicator.js';
 import { ConfirmationDialog } from '../ConfirmationDialog.js';
 import { ActionProcessor } from '../../keyboard/action-processor.js';
+import { useOptimisticOperations } from '../../hooks/optimistic.js';
+import { NotificationSystem } from '../NotificationSystem.js';
 
 interface Service {
   serviceName: string;
@@ -49,6 +51,39 @@ export function ServicesView() {
   const [mode, setMode] = useState<'list' | 'search' | 'detail'>('list');
 
   const commandFacade = CommandFacade.getInstance();
+  const { optimisticDelete, optimisticRestart, isPending } = useOptimisticOperations();
+
+  // Helper functions for optimistic operations
+  const removeServicesFromList = (serviceIds: string[]) => {
+    setServices(prev => prev.filter(s => !serviceIds.includes(s.serviceName)));
+    setFilteredServices(prev => prev.filter(s => !serviceIds.includes(s.serviceName)));
+  };
+
+  const restoreServicesToList = (restoredServices: Service[]) => {
+    setServices(prev => [...prev, ...restoredServices]);
+    setFilteredServices(prev => [...prev, ...restoredServices]);
+  };
+
+  const updateServiceStatus = (serviceIds: string[], status: string) => {
+    const updateServices = (services: Service[]) => 
+      services.map(s => 
+        serviceIds.includes(s.serviceName) ? { ...s, status } : s
+      );
+    
+    setServices(updateServices);
+    setFilteredServices(updateServices);
+  };
+
+  const restoreServiceStatus = (statusUpdates: Array<{ id: string; originalStatus: string }>) => {
+    const updateServices = (services: Service[]) => 
+      services.map(s => {
+        const update = statusUpdates.find(u => u.id === s.serviceName);
+        return update ? { ...s, status: update.originalStatus } : s;
+      });
+    
+    setServices(updateServices);
+    setFilteredServices(updateServices);
+  };
 
   // Register action handlers with stable references to avoid memory leaks
   useEffect(() => {
@@ -221,30 +256,110 @@ export function ServicesView() {
     }
   };
 
-  // Handle confirmation dialog actions
+  // Handle confirmation dialog actions with optimistic updates
   const handleConfirmAction = async () => {
     if (!confirmAction) return;
     
     try {
       switch (confirmAction.action) {
-        case 'delete':
-          // TODO: Implement service deletion
-          console.log('Deleting service:', filteredServices[currentServiceIndex]?.serviceName);
+        case 'delete': {
+          const currentService = filteredServices[currentServiceIndex];
+          if (currentService) {
+            await optimisticDelete(
+              [currentService],
+              (service) => service.serviceName,
+              (service) => service.serviceName,
+              removeServicesFromList,
+              restoreServicesToList,
+              async (ids) => {
+                // TODO: Replace with actual API call
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                // Simulate occasional failure for testing
+                if (Math.random() < 0.1) {
+                  throw new Error('Service deletion failed');
+                }
+                return { success: true };
+              }
+            );
+          }
           break;
-        case 'deleteBulk':
-          // TODO: Implement bulk service deletion
-          console.log('Deleting services:', selectedItems);
-          clearSelection();
+        }
+        case 'deleteBulk': {
+          const selectedServices = services.filter(s => 
+            selectedItems.includes(s.serviceName)
+          );
+          if (selectedServices.length > 0) {
+            await optimisticDelete(
+              selectedServices,
+              (service) => service.serviceName,
+              (service) => service.serviceName,
+              removeServicesFromList,
+              restoreServicesToList,
+              async (ids) => {
+                // TODO: Replace with actual API call
+                await new Promise(resolve => setTimeout(resolve, 1500));
+                // Simulate occasional failure for testing
+                if (Math.random() < 0.15) {
+                  throw new Error('Bulk deletion failed');
+                }
+                return { success: true };
+              }
+            );
+            clearSelection();
+          }
           break;
-        case 'restart':
-          // TODO: Implement service restart
-          console.log('Restarting service:', filteredServices[currentServiceIndex]?.serviceName);
+        }
+        case 'restart': {
+          const currentService = filteredServices[currentServiceIndex];
+          if (currentService) {
+            await optimisticRestart(
+              [currentService],
+              (service) => service.serviceName,
+              (service) => service.serviceName,
+              updateServiceStatus,
+              restoreServiceStatus,
+              async (ids) => {
+                // TODO: Replace with actual API call
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                // Simulate occasional failure for testing
+                if (Math.random() < 0.1) {
+                  throw new Error('Service restart failed');
+                }
+                // Update status to started after restart
+                updateServiceStatus(ids, 'started');
+                return { success: true };
+              }
+            );
+          }
           break;
-        case 'restartBulk':
-          // TODO: Implement bulk service restart
-          console.log('Restarting services:', selectedItems);
-          clearSelection();
+        }
+        case 'restartBulk': {
+          const selectedServices = services.filter(s => 
+            selectedItems.includes(s.serviceName)
+          );
+          if (selectedServices.length > 0) {
+            await optimisticRestart(
+              selectedServices,
+              (service) => service.serviceName,
+              (service) => service.serviceName,
+              updateServiceStatus,
+              restoreServiceStatus,
+              async (ids) => {
+                // TODO: Replace with actual API call
+                await new Promise(resolve => setTimeout(resolve, 3000));
+                // Simulate occasional failure for testing
+                if (Math.random() < 0.15) {
+                  throw new Error('Bulk restart failed');
+                }
+                // Update status to started after restart
+                updateServiceStatus(ids, 'started');
+                return { success: true };
+              }
+            );
+            clearSelection();
+          }
           break;
+        }
       }
     } catch (error) {
       console.error('Action failed:', error);
@@ -417,6 +532,9 @@ export function ServicesView() {
         onConfirm={handleConfirmAction}
         onCancel={handleCancelAction}
       />
+      
+      {/* Notification system */}
+      <NotificationSystem position="top-right" maxNotifications={3} />
     </Box>
   );
 }

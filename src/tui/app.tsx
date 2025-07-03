@@ -18,6 +18,10 @@ import { ThemePreview } from './components/ThemePreview.js';
 import { SessionSync } from './utils/sessionSync.js';
 import { ErrorBoundary } from './components/common/ErrorBoundary.js';
 import { useTheme } from './themes/theme-manager.js';
+import { HelpSystem, useHelpSystem } from './components/HelpSystem.js';
+import { CommandPalette, useCommandPalette } from './components/CommandPalette.js';
+import { OnboardingHints, useOnboarding } from './components/OnboardingHints.js';
+import { QuickReference, useQuickReference } from './components/QuickReference.js';
 
 function ParentPane() {
   const { state } = useNavigation();
@@ -247,9 +251,20 @@ function RightPane() {
 }
 
 function TuiApp() {
-  const { updateAuth, state } = useNavigation();
+  const { updateAuth, state, navigate } = useNavigation();
   const { exit } = useApp();
   const { nextTheme, previousTheme, randomTheme } = useTheme();
+  
+  // Help system and documentation features
+  const { isVisible: helpVisible, showHelp, hideHelp, toggleHelp } = useHelpSystem();
+  const { isVisible: paletteVisible, showPalette, hidePalette } = useCommandPalette();
+  const { isVisible: referenceVisible, showReference, hideReference } = useQuickReference();
+  const { 
+    userInteractions, 
+    trackSelection, 
+    trackKeyboardUse, 
+    resetViewTracking 
+  } = useOnboarding();
   
   // Set up session monitoring
   useEffect(() => {
@@ -263,15 +278,47 @@ function TuiApp() {
     
     return stopMonitoring;
   }, [updateAuth]);
+
+  // Reset onboarding tracking when view changes
+  useEffect(() => {
+    resetViewTracking();
+  }, [state.currentView.id, resetViewTracking]);
   
   // Global key handlers
   useInput((input, key) => {
+    // Skip if any overlay is visible to prevent conflicts
+    if (helpVisible || paletteVisible || referenceVisible) {
+      return;
+    }
+    
+    // Track keyboard usage for onboarding
+    trackKeyboardUse();
+    
+    // Help system
+    if (input === '?') {
+      toggleHelp();
+      return;
+    }
+    
+    // Command palette
+    if (input === ':') {
+      showPalette();
+      return;
+    }
+    
+    // Quick reference (with auto-hide)
+    if (key.ctrl && input === 'h') {
+      showReference();
+      return;
+    }
+    
     // Ctrl+C to exit
     if (key.ctrl && input === 'c') {
       exit();
+      return;
     }
     
-    // Theme switching
+    // Theme switching (only if no overlays are visible)
     if (input === ']') {
       nextTheme();
     } else if (input === '[') {
@@ -279,10 +326,45 @@ function TuiApp() {
     } else if (input === 'r') {
       randomTheme();
     }
-  });
+  }, { isActive: !helpVisible && !paletteVisible && !referenceVisible });
   
+  // Handle command palette actions
+  const handlePaletteAction = (action: string) => {
+    switch (action) {
+      case 'refresh':
+        // Trigger refresh in current view
+        break;
+      case 'search':
+        // TODO: Trigger search mode
+        break;
+      case 'help':
+        showHelp();
+        break;
+      case 'quit':
+        exit();
+        break;
+      case 'clearSelection':
+        // TODO: Clear selection
+        break;
+      case 'selectAll':
+        // TODO: Select all
+        break;
+      case 'changeTheme':
+        nextTheme();
+        break;
+      default:
+        console.log('Unknown action:', action);
+    }
+  };
+
   return (
-    <KeyboardProvider viewId={state.currentView.id}>
+    <KeyboardProvider 
+      viewId={state.currentView.id}
+      onKeyPress={(key, action) => {
+        // Track keyboard usage for onboarding
+        trackKeyboardUse();
+      }}
+    >
       <Layout>
         <Pane title="Parent Context" width={25}>
           <ParentPane />
@@ -295,6 +377,32 @@ function TuiApp() {
         <Pane title="Detail & Support" width={25}>
           <RightPane />
         </Pane>
+        
+        {/* Overlay components */}
+        <HelpSystem
+          visible={helpVisible}
+          onClose={hideHelp}
+          currentView={state.currentView.id}
+          currentMode="NAVIGATION"
+        />
+        
+        <CommandPalette
+          visible={paletteVisible}
+          onClose={hidePalette}
+          onNavigate={navigate}
+          onAction={handlePaletteAction}
+        />
+        
+        <QuickReference
+          visible={referenceVisible}
+          onClose={hideReference}
+          viewId={state.currentView.id}
+        />
+        
+        <OnboardingHints
+          currentView={state.currentView.id}
+          userInteractions={userInteractions}
+        />
       </Layout>
     </KeyboardProvider>
   );
