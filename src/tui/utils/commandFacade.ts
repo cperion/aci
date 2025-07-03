@@ -126,4 +126,56 @@ export class CommandFacade {
   async portalItems(query: string = '*'): Promise<CommandResult> {
     return this.executeCommand('items', ['find', query]);
   }
+  
+  // Admin operations
+  async adminLogs(): Promise<CommandResult> {
+    return this.executeCommand('admin', ['logs']);
+  }
+  
+  async adminHealth(): Promise<CommandResult> {
+    return this.executeCommand('admin', ['health']);
+  }
+  
+  // Insights operations
+  async insightsAuthFailures(timeRange: string): Promise<CommandResult> {
+    return this.executeCommand('insights', ['auth-failures', '--timeRange', timeRange]);
+  }
+  
+  async insightsServiceHealth(timeRange: string): Promise<CommandResult> {
+    return this.executeCommand('insights', ['service-health', '--timeRange', timeRange]);
+  }
+  
+  async insightsCommandTrends(timeRange: string): Promise<CommandResult> {
+    return this.executeCommand('insights', ['command-trends', '--timeRange', timeRange]);
+  }
+  
+  async insightsResourceTrends(timeRange: string): Promise<CommandResult> {
+    return this.executeCommand('insights', ['resource-trends', '--timeRange', timeRange]);
+  }
+  
+  // Analytics operations
+  async analyzeTemplate(): Promise<CommandResult> {
+    return this.executeCommand('analyze', ['template']);
+  }
+  
+  async analyzeSql(query: string): Promise<CommandResult> {
+    return this.executeCommand('analyze', ['sql', query]);
+  }
+  
+  async analyzeSchema(): Promise<CommandResult> {
+    return this.executeCommand('analyze', ['schema']);
+  }
+  
+  // Datastore operations
+  async datastoresList(): Promise<CommandResult> {
+    return this.executeCommand('datastores', ['list']);
+  }
+  
+  async datastoresValidate(): Promise<CommandResult> {
+    return this.executeCommand('datastores', ['validate']);
+  }
+  
+  async datastoresHealth(): Promise<CommandResult> {
+    return this.executeCommand('datastores', ['health']);
+  }
 }
