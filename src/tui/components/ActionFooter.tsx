@@ -12,19 +12,25 @@ export type ActionFooterProps = {
 export function ActionFooter({ shortcuts, mode, selectedCount = 0 }: ActionFooterProps) {
   const { colors } = useTheme();
 
-  // Filter and prioritize shortcuts based on mode and selection
-  const displayShortcuts = shortcuts
-    .filter(shortcut => {
-      if (!shortcut.mode || shortcut.mode.includes(mode)) {
-        return true;
-      }
-      return false;
-    })
-    .slice(0, 6); // Limit to prevent overflow
+  // Memoize filtering and prioritization to avoid re-computation on every render
+  const displayShortcuts = React.useMemo(() => {
+    return shortcuts
+      .filter(shortcut => {
+        // Safe mode checking with null guards
+        if (!shortcut.mode || shortcut.mode.includes(mode)) {
+          return true;
+        }
+        return false;
+      })
+      .sort((a, b) => (a.priority || 5) - (b.priority || 5))
+      .slice(0, 6); // Limit to prevent overflow
+  }, [shortcuts, mode]);
 
   if (displayShortcuts.length === 0) {
     return null;
   }
+
+  const hasMoreShortcuts = shortcuts.length > displayShortcuts.length;
 
   return (
     <Box
@@ -40,6 +46,11 @@ export function ActionFooter({ shortcuts, mode, selectedCount = 0 }: ActionFoote
             <Text color={colors.highlights}>[{shortcut.key}]</Text> {shortcut.label}
           </Text>
         ))}
+        {hasMoreShortcuts && (
+          <Text color={colors.metadata}>
+            +{shortcuts.length - displayShortcuts.length} more
+          </Text>
+        )}
       </Box>
       
       <Box gap={2}>

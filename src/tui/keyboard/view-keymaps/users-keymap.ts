@@ -55,11 +55,12 @@ export const usersKeymap: ViewKeymap = {
     },
     
     // Selection
-    ' ': {
-      key: ' ',
+    'Space': {
+      key: 'Space',
       label: 'Select',
       action: 'toggleUserSelection',
-      mode: ['NAVIGATION', 'SELECTION']
+      mode: ['NAVIGATION', 'SELECTION'],
+      priority: 1
     },
     
     // Bulk operations (SELECTION mode)

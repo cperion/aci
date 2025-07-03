@@ -9,14 +9,16 @@ export const servicesKeymap: ViewKeymap = {
       label: 'Delete',
       action: 'deleteSelectedService',
       mode: ['NAVIGATION'],
-      available: (state) => state.currentItem
+      available: (state) => state?.currentItem,
+      priority: 2
     },
     'r': {
       key: 'r',
       label: 'Restart',
       action: 'restartSelectedService',
       mode: ['NAVIGATION'],
-      available: (state) => state.currentItem
+      available: (state) => state?.currentItem,
+      priority: 3
     },
     'i': {
       key: 'i',
@@ -44,21 +46,24 @@ export const servicesKeymap: ViewKeymap = {
       key: 'j',
       label: 'Down',
       action: 'moveDown',
-      mode: ['NAVIGATION']
+      mode: ['NAVIGATION'],
+      priority: 0
     },
     'k': {
       key: 'k',
       label: 'Up',
       action: 'moveUp',
-      mode: ['NAVIGATION']
+      mode: ['NAVIGATION'],
+      priority: 0
     },
     
     // Selection operations
-    ' ': {
-      key: ' ',
+    'Space': {
+      key: 'Space',
       label: 'Select',
       action: 'toggleServiceSelection',
-      mode: ['NAVIGATION', 'SELECTION']
+      mode: ['NAVIGATION', 'SELECTION'],
+      priority: 1
     },
     
     // Bulk operations (SELECTION mode)

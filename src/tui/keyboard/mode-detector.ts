@@ -13,6 +13,7 @@ export type ViewState = {
   searchActive: boolean;
   modalOpen: boolean;
   currentView: string;
+  currentItem?: any;
 };
 
 export class ModeDetector {

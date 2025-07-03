@@ -9,6 +9,13 @@ import type { ViewMode } from '../keyboard/keymap-registry.js';
 import { homeKeymap } from '../keyboard/view-keymaps/home-keymap.js';
 import { servicesKeymap } from '../keyboard/view-keymaps/services-keymap.js';
 import { usersKeymap } from '../keyboard/view-keymaps/users-keymap.js';
+import { groupsKeymap } from '../keyboard/view-keymaps/groups-keymap.js';
+import { itemsKeymap } from '../keyboard/view-keymaps/items-keymap.js';
+import { analyticsKeymap } from '../keyboard/view-keymaps/analytics-keymap.js';
+import { adminKeymap } from '../keyboard/view-keymaps/admin-keymap.js';
+import { loginKeymap } from '../keyboard/view-keymaps/login-keymap.js';
+import { datastoresKeymap } from '../keyboard/view-keymaps/datastores-keymap.js';
+import { insightsKeymap } from '../keyboard/view-keymaps/insights-keymap.js';
 
 type KeyboardContextValue = {
   currentMode: ViewMode;
@@ -33,13 +40,15 @@ export function KeyboardProvider({
   viewId: string;
   onKeyPress?: (key: string, action: string | null) => void;
 }) {
-  const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [viewState, setViewStateInternal] = useState<ViewState>({
     selectedItems: [],
     searchActive: false,
     modalOpen: false,
     currentView: viewId
   });
+  
+  // selectedItems is now derived from viewState to avoid sync issues
+  const selectedItems = viewState.selectedItems;
 
   const keymapRegistry = KeymapRegistry.getInstance();
   const actionProcessor = ActionProcessor.getInstance();
@@ -49,16 +58,22 @@ export function KeyboardProvider({
     keymapRegistry.registerViewKeymap(homeKeymap);
     keymapRegistry.registerViewKeymap(servicesKeymap);
     keymapRegistry.registerViewKeymap(usersKeymap);
+    keymapRegistry.registerViewKeymap(groupsKeymap);
+    keymapRegistry.registerViewKeymap(itemsKeymap);
+    keymapRegistry.registerViewKeymap(analyticsKeymap);
+    keymapRegistry.registerViewKeymap(adminKeymap);
+    keymapRegistry.registerViewKeymap(loginKeymap);
+    keymapRegistry.registerViewKeymap(datastoresKeymap);
+    keymapRegistry.registerViewKeymap(insightsKeymap);
   }, [keymapRegistry]);
 
-  // Update view state when selected items change
+  // Update view state when viewId changes
   useEffect(() => {
     setViewStateInternal(prev => ({
       ...prev,
-      selectedItems,
       currentView: viewId
     }));
-  }, [selectedItems, viewId]);
+  }, [viewId]);
 
   const currentMode = ModeDetector.detectMode(viewState);
 
@@ -66,18 +81,32 @@ export function KeyboardProvider({
     setViewStateInternal(prev => ({ ...prev, ...newState }));
   }, []);
 
+  const setSelectedItems = useCallback((items: string[]) => {
+    setViewStateInternal(prev => ({
+      ...prev,
+      selectedItems: items
+    }));
+  }, []);
+
   const toggleItemSelection = useCallback((item: string) => {
-    setSelectedItems(prev => {
-      if (prev.includes(item)) {
-        return prev.filter(i => i !== item);
-      } else {
-        return [...prev, item];
-      }
+    setViewStateInternal(prev => {
+      const currentItems = prev.selectedItems;
+      const newItems = currentItems.includes(item)
+        ? currentItems.filter(i => i !== item)
+        : [...currentItems, item];
+      
+      return {
+        ...prev,
+        selectedItems: newItems
+      };
     });
   }, []);
 
   const clearSelection = useCallback(() => {
-    setSelectedItems([]);
+    setViewStateInternal(prev => ({
+      ...prev,
+      selectedItems: []
+    }));
   }, []);
 
   const registerActionHandler = useCallback((action: string, handler: (action: string, context?: any) => void) => {

@@ -49,15 +49,30 @@ export class ActionProcessor {
     key: string, 
     context: ActionContext
   ): Promise<boolean> {
-    // Queue all actions to prevent race conditions
-    const result = this.actionQueue.then(async () => {
+    const QUEUE_TIMEOUT = 5000; // 5 seconds
+    
+    // Create timeout promise
+    const timeoutPromise = new Promise<boolean>((_, reject) => 
+      setTimeout(() => reject(new Error('Action timeout')), QUEUE_TIMEOUT)
+    );
+    
+    // Queue all actions to prevent race conditions with timeout
+    const actionPromise = this.actionQueue.then(async () => {
       return this.processKeyInternal(key, context);
     }).catch(error => {
       console.error('Error processing key:', error);
+      this.emergencyReset(); // Reset on error
       return false;
     });
     
-    this.actionQueue = result.then(() => {});
+    // Race between action execution and timeout
+    const result = Promise.race([actionPromise, timeoutPromise]).catch(error => {
+      console.error('Action processing failed:', error);
+      this.emergencyReset();
+      return false;
+    });
+    
+    this.actionQueue = result.then(() => {}).catch(() => {}); // Ensure queue continues
     return result;
   }
 
@@ -72,10 +87,10 @@ export class ActionProcessor {
       return false;
     }
 
-    // Create immutable context to prevent mutations
+    // Create shallow copy context to prevent mutations while maintaining performance
     const safeContext: ActionContext = {
       viewId,
-      state: JSON.parse(JSON.stringify(state)),
+      state: { ...state }, // Shallow copy is sufficient for our needs
       selectedItems: [...(context.selectedItems || [])],
       currentItem: context.currentItem
     };
