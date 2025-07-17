@@ -1,5 +1,5 @@
 import { getSession } from '../session.js';
-import type { UserSession } from '@esri/arcgis-rest-auth';
+import type { UserSession } from '../types/arcgis-raw.js';
 
 /**
  * Safe error handling for portal operations

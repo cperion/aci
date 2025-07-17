@@ -1,9 +1,8 @@
 import { getSession } from '../session.js';
 import type { Environment } from '../session.js';
-import { searchItems } from '@esri/arcgis-rest-portal';
+import { arcgisRequest } from '../services/http-client.js';
 import { handleError } from '../errors/handler.js';
-import type { ISearchResult, IItem } from '@esri/arcgis-rest-portal';
-import type { UserSession } from '@esri/arcgis-rest-auth';
+import type { UserSession } from '../types/arcgis-raw.js';
 
 interface SearchOptions {
   type?: string;
@@ -11,6 +10,19 @@ interface SearchOptions {
   limit?: string;
   json?: boolean;
   env?: Environment;
+}
+
+interface SearchResult {
+  total: number;
+  results: Array<{
+    id: string;
+    title: string;
+    type: string;
+    owner: string;
+    snippet?: string;
+    url?: string;
+    modified: number;
+  }>;
 }
 
 export async function searchCommand(query: string, options: SearchOptions): Promise<void> {
@@ -25,45 +37,13 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
     console.log(`Searching portal for: "${query}"`);
     console.log(`Portal: ${session.portal}`);
     
-    // Check if we're in Node.js environment
-    const isNodeEnvironment = typeof window === 'undefined';
+    // Use direct API call for portal search
+    const results = await searchPortalItems(query, options, session);
     
-    if (isNodeEnvironment) {
-      // Use direct fetch in Node.js to avoid CORS-related browser functions
-      const results = await directSearchFetch(query, options, session);
-      
-      if (options.json) {
-        console.log(JSON.stringify(results, null, 2));
-      } else {
-        formatSearchResults(results);
-      }
+    if (options.json) {
+      console.log(JSON.stringify(results, null, 2));
     } else {
-      // Use ArcGIS REST JS for browser compatibility
-      const searchOptions: any = {
-        q: query,
-        num: parseInt(options.limit || '10'),
-        authentication: session
-      };
-      
-      // Add type filter if specified
-      if (options.type) {
-        searchOptions.q += ` type:"${options.type}"`;
-      }
-      
-      // Add owner filter if specified
-      if (options.owner) {
-        searchOptions.q += ` owner:${options.owner}`;
-      }
-      
-      console.log(`Search query: ${searchOptions.q}`);
-      
-      const results: ISearchResult<IItem> = await searchItems(searchOptions);
-      
-      if (options.json) {
-        console.log(JSON.stringify(results, null, 2));
-      } else {
-        formatSearchResults(results);
-      }
+      formatSearchResults(results);
     }
     
   } catch (error) {
@@ -71,15 +51,15 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
   }
 }
 
-// Direct fetch fallback for when ArcGIS REST JS has issues
-async function directSearchFetch(query: string, options: SearchOptions, session: UserSession): Promise<ISearchResult<IItem>> {
+// Portal search using raw API
+async function searchPortalItems(query: string, options: SearchOptions, session: UserSession): Promise<SearchResult> {
   // Ensure we use the correct portal URL structure
   let portalBaseUrl = session.portal;
   if (!portalBaseUrl.includes('/sharing/rest')) {
     portalBaseUrl = `${portalBaseUrl}/portal/sharing/rest`;
   }
   
-  const searchUrl = new URL(`${portalBaseUrl}/search`);
+  const searchUrl = `${portalBaseUrl}/search`;
   
   // Build query string
   let searchQuery = query;
@@ -97,23 +77,13 @@ async function directSearchFetch(query: string, options: SearchOptions, session:
   console.log(`Search query: ${searchQuery}`);
   
   // Set search parameters
-  searchUrl.searchParams.set('q', searchQuery);
-  searchUrl.searchParams.set('f', 'json');
-  searchUrl.searchParams.set('num', options.limit || '10');
-  searchUrl.searchParams.set('start', '1');
+  const params = {
+    q: searchQuery,
+    num: options.limit || '10',
+    start: '1'
+  };
   
-  // Add token for authentication
-  if (session.token) {
-    searchUrl.searchParams.set('token', session.token);
-  }
-  
-  const response = await fetch(searchUrl.toString());
-  
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-  }
-  
-  const results = await response.json();
+  const results = await arcgisRequest(searchUrl, params, session);
   
   if (results.error) {
     throw new Error(`Search failed: ${results.error.message}`);
@@ -122,7 +92,7 @@ async function directSearchFetch(query: string, options: SearchOptions, session:
   return results;
 }
 
-function formatSearchResults(results: ISearchResult<IItem>): void {
+function formatSearchResults(results: SearchResult): void {
   console.log(`\n=== Search Results ===`);
   console.log(`Found ${results.total} items (showing ${results.results.length})`);
   console.log('');
@@ -132,7 +102,7 @@ function formatSearchResults(results: ISearchResult<IItem>): void {
     return;
   }
   
-  results.results.forEach((item: IItem, index: number) => {
+  results.results.forEach((item, index: number) => {
     console.log(`${index + 1}. ${item.title}`);
     console.log(`   Type: ${item.type}`);
     console.log(`   Owner: ${item.owner}`);

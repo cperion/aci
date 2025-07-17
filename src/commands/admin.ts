@@ -9,7 +9,10 @@ import {
   listDatastoresCommand, 
   validateDatastoreCommand, 
   machinesCommand, 
-  backupInfoCommand 
+  backupInfoCommand,
+  registerDatastoreCommand,
+  unregisterDatastoreCommand,
+  updateDatastoreCommand
 } from './datastores.js';
 
 export interface AdminCommandOptions {
@@ -204,6 +207,44 @@ function registerDatastoreCommands(adminCmd: Command): void {
     .description('Show backup status across all data stores')
     .option('--env <environment>', 'Environment to use')
     .action(backupInfoCommand);
+
+  datastoresCmd
+    .command('register <name>')
+    .description('Register a new data store')
+    .requiredOption('--type <type>', 'Data store type (enterprise, cloud, relational, tileCache, spatiotemporal, graph, object, fileShare, raster)')
+    .option('--provider <provider>', 'Data store provider')
+    .option('--connection-string <connectionString>', 'Connection string for the data store')
+    .option('--host <host>', 'Database host')
+    .option('--port <port>', 'Database port')
+    .option('--database <database>', 'Database name')
+    .option('--username <username>', 'Database username')
+    .option('--password <password>', 'Database password')
+    .option('--on-server-start', 'Start data store on server startup')
+    .option('--is-managed', 'Data store is managed by ArcGIS Server')
+    .option('--env <environment>', 'Environment to use')
+    .action(registerDatastoreCommand);
+
+  datastoresCmd
+    .command('unregister <name>')
+    .description('Unregister a data store')
+    .option('--env <environment>', 'Environment to use')
+    .action(unregisterDatastoreCommand);
+
+  datastoresCmd
+    .command('update <name>')
+    .description('Update data store configuration')
+    .option('--type <type>', 'Data store type')
+    .option('--provider <provider>', 'Data store provider')
+    .option('--connection-string <connectionString>', 'Connection string for the data store')
+    .option('--host <host>', 'Database host')
+    .option('--port <port>', 'Database port')
+    .option('--database <database>', 'Database name')
+    .option('--username <username>', 'Database username')
+    .option('--password <password>', 'Database password')
+    .option('--on-server-start', 'Start data store on server startup')
+    .option('--is-managed', 'Data store is managed by ArcGIS Server')
+    .option('--env <environment>', 'Environment to use')
+    .action(updateDatastoreCommand);
 }
 
 // Command Implementations
@@ -437,6 +478,10 @@ export async function adminLoginCommand(options: AdminCommandOptions & {
       console.error('Must specify either --token or --username');
       process.exit(1);
     }
+    
+    // Update current environment to ensure subsequent commands find the session
+    const { setCurrentEnvironment } = await import('../session.js');
+    setCurrentEnvironment(environment);
     
   } catch (error) {
     handleError(error, 'Admin login failed');

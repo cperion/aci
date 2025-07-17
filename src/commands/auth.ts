@@ -1,6 +1,6 @@
 import { getSession, saveSession, clearSession, getPortalUrl, getCurrentEnvironment, setCurrentEnvironment, listEnvironments } from '../session.js';
 import type { Environment } from '../session.js';
-import { UserSession } from '@esri/arcgis-rest-auth';
+import type { UserSession } from '../types/arcgis-raw.js';
 import { handleError } from '../errors/handler.js';
 import { validateUrl, isEnterprisePortal, normalizeBasePortalUrl, buildSharingRestUrl } from '../services/validator.js';
 const read = require('read').read;
@@ -83,19 +83,33 @@ export async function loginCommand(options: LoginOptions): Promise<void> {
 async function handleTokenLogin(sharingRestUrl: string, token: string, env?: Environment): Promise<void> {
   console.log('Validating API token...');
   
-  // Create session with token - let saveSession handle expiration
+  // Create session with token
   const basePortalUrl = normalizeBasePortalUrl(sharingRestUrl);
-  const session = new UserSession({
-    portal: basePortalUrl,
-    token
-  });
   
   try {
-    // Validate token by making a test request
-    await session.getUser();
+    // Validate token by making a test request to get user info
+    const userInfoUrl = `${sharingRestUrl}/community/self`;
+    const response = await fetch(`${userInfoUrl}?token=${encodeURIComponent(token)}&f=json`);
+    
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+    }
+    
+    const userInfo = await response.json();
+    
+    if (userInfo.error) {
+      throw new Error(`Portal error: ${userInfo.error.message}`);
+    }
+    
+    const session: UserSession = {
+      portal: basePortalUrl,
+      token,
+      username: userInfo.username
+    };
+    
     await saveSession(session, env);
     console.log('✓ Enterprise session established successfully');
-    console.log(`✓ Authenticated as: ${session.username || 'unknown user'}`);
+    console.log(`✓ Authenticated as: ${userInfo.username || 'unknown user'}`);
   } catch (error) {
     throw new Error('Invalid token or portal unreachable. Please verify your token and portal URL.');
   }
@@ -110,18 +124,18 @@ async function handleUsernameLogin(sharingRestUrl: string, basePortalUrl: string
   try {
     console.log(`Attempting authentication with base portal: ${basePortalUrl}`);
     
-    const session = new UserSession({
-      username,
-      password,
-      portal: basePortalUrl
-    });
-
-    // Trigger authentication by requesting a token
-    const token = await session.getToken(basePortalUrl);
+    // Generate token using raw API call
+    const token = await generateTokenFromCredentials(sharingRestUrl, username, password);
     
     if (!token) {
       throw new Error('No token received from portal');
     }
+    
+    const session: UserSession = {
+      portal: basePortalUrl,
+      token,
+      username
+    };
     
     await saveSession(session, env);
     console.log('✓ Authentication successful');
@@ -129,9 +143,7 @@ async function handleUsernameLogin(sharingRestUrl: string, basePortalUrl: string
     console.log(`✓ Token: ${token.substring(0, 20)}...`);
     
   } catch (error) {
-    // Fallback to manual token generation with corrected parameters
-    console.log('UserSession authentication failed, trying manual token generation...');
-    await fallbackTokenGeneration(sharingRestUrl, basePortalUrl, username, password, env);
+    throw new Error(`Authentication failed: ${(error as Error).message}`);
   }
 }
 
@@ -208,17 +220,17 @@ async function fallbackTokenGeneration(sharingRestUrl: string, basePortalUrl: st
     }
     
     // Create session with generated token
-    const session = new UserSession({
+    const session: UserSession = {
       portal: basePortalUrl,
       token: tokenData.token,
       username,
       tokenExpires: new Date(tokenData.expires || Date.now() + 7200000) // 2 hours default
-    });
+    };
     
     await saveSession(session, env);
     console.log('✓ Manual token generation successful');
     console.log(`✓ Authenticated as: ${username}`);
-    console.log(`✓ Token expires: ${session.tokenExpires.toLocaleString()}`);
+    console.log(`✓ Token expires: ${session.tokenExpires?.toLocaleString() || 'Unknown'}`);
     
   } catch (error) {
     // Re-throw authentication errors as-is (they're already well formatted)
@@ -319,4 +331,43 @@ export async function statusCommand(): Promise<void> {
   } catch (error) {
     handleError(error, 'Status check failed');
   }
+}
+
+/**
+ * Generate token from username/password using raw API
+ */
+async function generateTokenFromCredentials(sharingRestUrl: string, username: string, password: string): Promise<string> {
+  const tokenUrl = `${sharingRestUrl}/generateToken`;
+  
+  const requestBody = new URLSearchParams({
+    username,
+    password,
+    expiration: '120', // 2 hours in minutes
+    referer: 'https://www.arcgis.com',
+    f: 'json'
+  });
+  
+  const response = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: requestBody
+  });
+  
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+  }
+  
+  const tokenData = await response.json();
+  
+  if (tokenData.error) {
+    throw new Error(`Portal error: ${tokenData.error.message}`);
+  }
+  
+  if (!tokenData.token) {
+    throw new Error('No token received from portal');
+  }
+  
+  return tokenData.token;
 }

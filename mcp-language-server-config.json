@@ -1,0 +1,11 @@
+{
+  "workspaceDir": "/home/cperion_ext/dev/aci",
+  "languageServers": [
+    {
+      "language": "typescript",
+      "command": "typescript-language-server",
+      "args": ["--stdio"],
+      "extensions": [".ts", ".tsx", ".js", ".jsx"]
+    }
+  ]
+}

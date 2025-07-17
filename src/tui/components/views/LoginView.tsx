@@ -1,11 +1,16 @@
-import React, { useState } from 'react';
-import { Box, Text, useInput } from 'ink';
+import React, { useState, useMemo } from 'react';
+import { Box, Text } from 'ink';
 import { TextInput, Spinner, Alert } from '@inkjs/ui';
-import { useNavigation } from '../../hooks/navigation.js';
-import { CommandFacade } from '../../utils/commandFacade.js';
+import { useNavigation } from '../../../hooks/use-navigation.js';
+import { useAuth } from '../../../hooks/use-auth.js';
+import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
+import { TuiCommandService } from '../../../services/tui-command-service.js';
+import type { CommandResult } from '../../../types/command-result.js';
 
 export function LoginView() {
-  const { goBack, updateAuth } = useNavigation();
+  const { goBack } = useNavigation();
+  const { authState } = useAuth();
+  const { portal: portalAuth } = authState;
   const [step, setStep] = useState<'portal' | 'token' | 'username' | 'password' | 'loading'>('portal');
   const [portal, setPortal] = useState('');
   const [token, setToken] = useState('');
@@ -14,12 +19,13 @@ export function LoginView() {
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  const commandFacade = CommandFacade.getInstance();
+  const commandService = useMemo(() => new TuiCommandService(), []);
 
-  // Global key handlers
-  useInput((input, key) => {
-    if (key.escape) {
-      goBack();
+  // Set up keyboard handlers
+  useViewKeyboard({
+    deps: [],
+    handlers: {
+      escape: () => goBack()
     }
   });
 
@@ -46,10 +52,10 @@ export function LoginView() {
     setError('');
 
     try {
-      const result = await commandFacade.login(portal, tokenValue);
+      const result: CommandResult = await commandService.loginPortal({ portal, token: tokenValue });
       
       if (result.success) {
-        updateAuth({ portal: true });
+        // Auth state is handled by the command service
         goBack();
       } else {
         setError(result.error || 'Login failed');
@@ -79,10 +85,10 @@ export function LoginView() {
     setError('');
 
     try {
-      const result = await commandFacade.login(portal, undefined, username);
+      const result = await commandService.login(portal, undefined, username);
       
       if (result.success) {
-        updateAuth({ portal: true });
+        // Auth state is handled by the command service
         goBack();
       } else {
         setError(result.error || 'Login failed');

@@ -25,6 +25,20 @@ export interface DatastoreCommandOptions {
   env?: string;
 }
 
+export interface DatastoreRegistrationOptions extends DatastoreCommandOptions {
+  type: string;
+  provider?: string;
+  onServerStart?: boolean;
+  isManaged?: boolean;
+  connectionString?: string;
+  host?: string;
+  port?: string;
+  database?: string;
+  username?: string;
+  password?: string;
+  [key: string]: any;
+}
+
 /**
  * List all registered data stores
  */
@@ -136,4 +150,128 @@ export async function backupInfoCommand(options: DatastoreCommandOptions): Promi
   } catch (error) {
     handleError(error as Error, 'Failed to get backup information');
   }
+}
+
+/**
+ * Register a new data store
+ */
+export async function registerDatastoreCommand(
+  name: string,
+  options: DatastoreRegistrationOptions
+): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    console.log(`Registering data store: ${name}...`);
+    
+    // Build connection parameters based on type
+    const connectionParams = buildConnectionParams(options);
+    
+    const config = {
+      name,
+      type: options.type as any,
+      provider: options.provider,
+      onServerStart: options.onServerStart,
+      isManaged: options.isManaged,
+      connectionParams
+    };
+    
+    const result = await client.registerDatastore(config);
+    
+    console.log(`✓ Data store '${name}' registered successfully`);
+    console.log(`  Type: ${result.type}`);
+    console.log(`  Provider: ${result.provider || 'Default'}`);
+    console.log(`  Status: ${result.status}`);
+    
+  } catch (error) {
+    handleError(error as Error, `Failed to register data store '${name}'`);
+  }
+}
+
+/**
+ * Unregister a data store
+ */
+export async function unregisterDatastoreCommand(
+  name: string,
+  options: DatastoreCommandOptions
+): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    console.log(`Unregistering data store: ${name}...`);
+    
+    await client.unregisterDatastore(name);
+    
+    console.log(`✓ Data store '${name}' unregistered successfully`);
+    
+  } catch (error) {
+    handleError(error as Error, `Failed to unregister data store '${name}'`);
+  }
+}
+
+/**
+ * Update data store configuration
+ */
+export async function updateDatastoreCommand(
+  name: string,
+  options: DatastoreRegistrationOptions
+): Promise<void> {
+  try {
+    const session = await requireAdminSession(options.env);
+    const client = new ArcGISServerAdminClient(session);
+    
+    console.log(`Updating data store: ${name}...`);
+    
+    // Build connection parameters based on provided options
+    const connectionParams = buildConnectionParams(options);
+    
+    const config = {
+      type: options.type as any,
+      provider: options.provider,
+      onServerStart: options.onServerStart,
+      isManaged: options.isManaged,
+      connectionParams
+    };
+    
+    const result = await client.updateDatastore(name, config);
+    
+    console.log(`✓ Data store '${name}' updated successfully`);
+    console.log(`  Type: ${result.type}`);
+    console.log(`  Provider: ${result.provider || 'Default'}`);
+    console.log(`  Status: ${result.status}`);
+    
+  } catch (error) {
+    handleError(error as Error, `Failed to update data store '${name}'`);
+  }
+}
+
+/**
+ * Build connection parameters from command options
+ */
+function buildConnectionParams(options: DatastoreRegistrationOptions): Record<string, string> {
+  const params: Record<string, string> = {};
+  
+  // Handle connection string
+  if (options.connectionString) {
+    params.connectionString = options.connectionString;
+  }
+  
+  // Handle individual connection parameters
+  if (options.host) params.host = options.host;
+  if (options.port) params.port = options.port;
+  if (options.database) params.database = options.database;
+  if (options.username) params.username = options.username;
+  if (options.password) params.password = options.password;
+  
+  // Handle additional parameters
+  const excludedKeys = ['type', 'provider', 'onServerStart', 'isManaged', 'env', 'detailed', 'timeout'];
+  for (const [key, value] of Object.entries(options)) {
+    if (!excludedKeys.includes(key) && value !== undefined) {
+      params[key] = String(value);
+    }
+  }
+  
+  return params;
 }

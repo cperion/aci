@@ -5,6 +5,7 @@ import { Alert } from '@inkjs/ui';
 interface Props {
   children: ReactNode;
   fallback?: ReactNode;
+  name?: string;
 }
 
 interface State {
@@ -23,7 +24,8 @@ export class ErrorBoundary extends Component<Props, State> {
   }
 
   override componentDidCatch(error: Error, errorInfo: any) {
-    console.error('TUI Error:', error, errorInfo);
+    const componentName = this.props.name ? ` in ${this.props.name}` : '';
+    console.error(`TUI Error${componentName}:`, error, errorInfo);
   }
 
   override render() {
@@ -32,10 +34,11 @@ export class ErrorBoundary extends Component<Props, State> {
         return this.props.fallback;
       }
 
+      const componentInfo = this.props.name ? ` in ${this.props.name}` : '';
       return (
         <Box flexDirection="column" gap={1}>
           <Alert variant="error" title="Application Error">
-            An unexpected error occurred in the TUI interface.
+            An unexpected error occurred{componentInfo} in the TUI interface.
           </Alert>
           {this.state.error && (
             <Box flexDirection="column" gap={1}>
