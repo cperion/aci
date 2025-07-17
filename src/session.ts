@@ -1,5 +1,5 @@
 import * as keytar from 'keytar';
-import { UserSession } from '@esri/arcgis-rest-auth';
+import type { UserSession } from './types/arcgis-raw.js';
 import { join } from 'path';
 import { homedir } from 'os';
 import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'fs';
@@ -196,12 +196,12 @@ export async function getSession(env?: Environment): Promise<UserSession | null>
       }
       
       // Create UserSession from stored data
-      return new UserSession({
+      return {
         portal: sessionData.portal,
         token: sessionData.token,
         username: sessionData.username,
         tokenExpires: new Date(sessionData.expires)
-      });
+      };
     }
   } catch (error) {
     // Keyring failed, continue to file fallback
@@ -225,12 +225,12 @@ export async function getSession(env?: Environment): Promise<UserSession | null>
     }
     
     // Create UserSession from stored data
-    return new UserSession({
+    return {
       portal: sessionData.portal,
       token: sessionData.token,
       username: sessionData.username,
       tokenExpires: new Date(sessionData.expires)
-    });
+    };
     
   } catch (error) {
     // Handle corrupted session data

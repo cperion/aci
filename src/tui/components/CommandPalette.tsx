@@ -232,25 +232,19 @@ export function CommandPalette({ visible, onClose, onNavigate, onAction }: Comma
 
   // Group commands by category
   const commandsByCategory = filteredCommands.reduce((acc, command) => {
-    if (!acc[command.category]) {
-      acc[command.category] = [];
+    const category = command.category;
+    if (!acc[category]) {
+      acc[category] = [];
     }
-    acc[command.category].push(command);
+    acc[category]!.push(command);
     return acc;
   }, {} as Record<string, Command[]>);
 
   return (
     <Box
-      position="absolute"
-      top={3}
-      left="50%"
-      marginLeft={-40}
-      width={80}
-      backgroundColor={colors.backgroundSecondary}
-      borderStyle="double"
-      borderColor={colors.highlights}
       flexDirection="column"
       padding={1}
+      width={80}
     >
       {/* Header */}
       <Box marginBottom={1}>
@@ -274,7 +268,6 @@ export function CommandPalette({ visible, onClose, onNavigate, onAction }: Comma
         <Box flexGrow={1}>
           {mode === 'search' ? (
             <TextInput
-              value={searchTerm}
               onChange={setSearchTerm}
               placeholder="Type to search commands..."
             />
@@ -287,7 +280,7 @@ export function CommandPalette({ visible, onClose, onNavigate, onAction }: Comma
       </Box>
 
       {/* Results */}
-      <Box flexDirection="column" flexGrow={1} maxHeight={20}>
+      <Box flexDirection="column" flexGrow={1} height={20}>
         {filteredCommands.length === 0 ? (
           <Text color={colors.warnings}>
             No commands found matching "{searchTerm}"

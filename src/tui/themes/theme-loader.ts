@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
+import { calculateContrastRatio, adjustColorForContrast, validateThemeContrast, MIN_CONTRAST_RATIO } from './color-utils.js';
 
 export interface Base16Theme {
   scheme: string;
@@ -29,9 +30,9 @@ export interface ArcGISColorMapping {
   panelBackground: string;     // base01 - magmatic strata
   workspaceBackground: string; // base02 - rusted topsoil
   
-  // Text hierarchy (organic materials)
-  metadata: string;            // base03 - twilight dusk
-  labels: string;             // base04 - fossilized amber
+  // Text hierarchy (organic materials) - contrast optimized
+  metadata: string;            // base03 → base04/06 for better contrast
+  labels: string;             // base04 → enhanced if needed
   primaryText: string;        // base05 - moonlit birch
   highlights: string;         // base06 - sun pillar
   separators: string;         // base07 - glacial meltwater
@@ -45,6 +46,13 @@ export interface ArcGISColorMapping {
   portals: string;            // base0D - stratospheric ice
   users: string;              // base0E - midnight bloom
   selections: string;         // base0F - magnetospheric flare
+  
+  // Additional properties for contrast debugging
+  contrastIssues?: Array<{
+    pair: [string, string];
+    ratio: number;
+    adjusted: boolean;
+  }>;
 }
 
 export class ThemeLoader {
@@ -163,17 +171,70 @@ export class ThemeLoader {
   }
 
   public mapToArcGIS(theme: Base16Theme): ArcGISColorMapping {
+    // Base color mapping
+    const mainBackground = `#${theme.base00}`;
+    const panelBackground = `#${theme.base01}`;
+    const workspaceBackground = `#${theme.base02}`;
+    
+    // Text colors with contrast optimization
+    let metadata = `#${theme.base03}`;
+    let labels = `#${theme.base04}`;
+    const primaryText = `#${theme.base05}`;
+    const highlights = `#${theme.base06}`;
+    
+    // Track adjustments for debugging
+    const contrastIssues: Array<{ pair: [string, string]; ratio: number; adjusted: boolean }> = [];
+    
+    // Validate and adjust critical text-background pairs
+    const metadataRatio = calculateContrastRatio(metadata, panelBackground);
+    if (metadataRatio < MIN_CONTRAST_RATIO) {
+      const adjusted = adjustColorForContrast(metadata, panelBackground);
+      if (adjusted !== metadata) {
+        contrastIssues.push({
+          pair: ['metadata', 'panelBackground'],
+          ratio: metadataRatio,
+          adjusted: true
+        });
+        metadata = adjusted;
+      } else {
+        // Fallback: try using base06 instead of base03
+        const fallback = `#${theme.base06}`;
+        const fallbackRatio = calculateContrastRatio(fallback, panelBackground);
+        if (fallbackRatio > metadataRatio) {
+          metadata = fallback;
+          contrastIssues.push({
+            pair: ['metadata', 'panelBackground'],
+            ratio: metadataRatio,
+            adjusted: true
+          });
+        }
+      }
+    }
+    
+    const labelsRatio = calculateContrastRatio(labels, panelBackground);
+    if (labelsRatio < MIN_CONTRAST_RATIO) {
+      const adjusted = adjustColorForContrast(labels, panelBackground);
+      if (adjusted !== labels) {
+        contrastIssues.push({
+          pair: ['labels', 'panelBackground'],
+          ratio: labelsRatio,
+          adjusted: true
+        });
+        labels = adjusted;
+      }
+    }
+    
     return {
       // Background layers (geological strata)
-      mainBackground: `#${theme.base00}`,      // obsidian bedrock
-      panelBackground: `#${theme.base01}`,     // magmatic strata  
-      workspaceBackground: `#${theme.base02}`, // rusted topsoil
+      mainBackground,                          // obsidian bedrock
+      panelBackground,                         // magmatic strata  
+      workspaceBackground,                     // rusted topsoil
       
-      // Text hierarchy (organic materials)
-      metadata: `#${theme.base03}`,            // twilight dusk
-      labels: `#${theme.base04}`,              // fossilized amber
-      primaryText: `#${theme.base05}`,         // moonlit birch
-      highlights: `#${theme.base06}`,          // sun pillar
+      // Text hierarchy (organic materials) - contrast optimized
+      metadata,                                // twilight dusk → enhanced contrast
+      labels,                                  // fossilized amber → enhanced contrast
+      primaryText,                             // moonlit birch
+      highlights,                              // sun pillar
       separators: `#${theme.base07}`,          // glacial meltwater
       
       // Semantic elements (atmospheric phenomena)
@@ -185,6 +246,9 @@ export class ThemeLoader {
       portals: `#${theme.base0D}`,             // stratospheric ice
       users: `#${theme.base0E}`,               // midnight bloom
       selections: `#${theme.base0F}`,          // magnetospheric flare
+      
+      // Debugging information
+      contrastIssues: contrastIssues.length > 0 ? contrastIssues : undefined
     };
   }
 

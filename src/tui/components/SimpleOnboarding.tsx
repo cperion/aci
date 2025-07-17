@@ -72,7 +72,7 @@ export function SimpleOnboarding({ currentView, hasUserInteracted }: SimpleOnboa
     if (availableHints.length > 0 && !currentHint) {
       // Show first available hint after a short delay
       const timer = setTimeout(() => {
-        setCurrentHint(availableHints[0]);
+        setCurrentHint(availableHints[0] || null);
       }, 2000);
 
       return () => clearTimeout(timer);
@@ -90,11 +90,7 @@ export function SimpleOnboarding({ currentView, hasUserInteracted }: SimpleOnboa
 
   return (
     <Box
-      position="absolute"
-      bottom={3}
-      left={2}
       width={50}
-      backgroundColor={colors.backgroundSecondary}
       borderStyle="round"
       borderColor={colors.highlights}
       flexDirection="column"

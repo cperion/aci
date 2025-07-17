@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Box, Text } from 'ink';
 import { TextInput, Spinner, Alert, Select, MultiSelect } from '@inkjs/ui';
-import { useNavigation } from '../../hooks/navigation.js';
-import { CommandFacade } from '../../utils/commandFacade.js';
+import { useAuth } from '../../../hooks/use-auth.js';
+import { useNavigation } from '../../../hooks/use-navigation.js';
+import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
+import { TuiCommandService } from '../../../services/tui-command-service.js';
 
 interface User {
   username: string;
@@ -14,36 +16,105 @@ interface User {
 }
 
 export function UsersView() {
-  const { goBack, navigate, setSelection, state } = useNavigation();
+  const { authState } = useAuth();
+  const { portal: portalAuth, portalSession } = authState;
+  const { goBack, navigate } = useNavigation();
   const [users, setUsers] = useState<User[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
+  const [currentUserIndex, setCurrentUserIndex] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedUser, setSelectedUser] = useState<string>('');
+  const [selectedUsers, setSelectedUsers] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
-  const [mode, setMode] = useState<'list' | 'search' | 'create'>('list');
+  const [mode, setMode] = useState<'list' | 'search' | 'create' | 'filter' | 'confirm-delete' | 'reset-password'>('list');
+  const [roleFilter, setRoleFilter] = useState<string>('all');
 
-  const commandFacade = CommandFacade.getInstance();
+  const commandService = useMemo(() => new TuiCommandService(portalSession || undefined), [portalSession]);
+
+  // Register keyboard handlers
+  useViewKeyboard({
+    viewId: 'users',
+    handlers: {
+      moveDown: () => {
+        setCurrentUserIndex(prev => Math.min(prev + 1, filteredUsers.length - 1));
+      },
+      moveUp: () => {
+        setCurrentUserIndex(prev => Math.max(prev - 1, 0));
+      },
+      delete: () => {
+        const currentUser = filteredUsers[currentUserIndex];
+        if (currentUser) {
+          setError('');
+          setMode('confirm-delete');
+          setSelectedUser(currentUser.username);
+        }
+      },
+      enter: () => {
+        const currentUser = filteredUsers[currentUserIndex];
+        if (currentUser) {
+          navigate('user-detail', `User: ${currentUser.username}`, { username: currentUser.username });
+        }
+      },
+      s: () => setMode('search'),
+      f: () => setMode('filter'),
+      c: () => setMode('create'),
+      r: () => loadUsers(),
+      p: () => {
+        const currentUser = filteredUsers[currentUserIndex];
+        if (currentUser) {
+          setError('');
+          setMode('reset-password');
+          setSelectedUser(currentUser.username);
+        }
+      },
+      escape: () => {
+        if (mode !== 'list') {
+          setMode('list');
+        } else {
+          goBack();
+        }
+      },
+      space: () => {
+        const currentUser = filteredUsers[currentUserIndex];
+        if (currentUser) {
+          setSelectedUsers(prev => {
+            const isSelected = prev.includes(currentUser.username);
+            return isSelected 
+              ? prev.filter(u => u !== currentUser.username)
+              : [...prev, currentUser.username];
+          });
+        }
+      }
+    }
+  }, [filteredUsers, currentUserIndex, mode]);
 
   // Load users on mount
   useEffect(() => {
     loadUsers();
   }, []);
 
-  // Filter users when search term changes
+  // Filter users when search term or role filter changes
   useEffect(() => {
-    if (!searchTerm.trim()) {
-      setFilteredUsers(users);
-    } else {
-      const filtered = users.filter(user =>
+    let filtered = users;
+    
+    if (searchTerm.trim()) {
+      filtered = filtered.filter(user =>
         user.username.toLowerCase().includes(searchTerm.toLowerCase()) ||
         user.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
         user.fullName.toLowerCase().includes(searchTerm.toLowerCase()) ||
         user.role.toLowerCase().includes(searchTerm.toLowerCase())
       );
-      setFilteredUsers(filtered);
     }
-  }, [searchTerm, users]);
+    
+    if (roleFilter !== 'all') {
+      filtered = filtered.filter(user => 
+        user.role.toLowerCase() === roleFilter.toLowerCase()
+      );
+    }
+    
+    setFilteredUsers(filtered);
+  }, [searchTerm, users, roleFilter]);
 
   const loadUsers = async () => {
     setIsLoading(true);
@@ -51,19 +122,27 @@ export function UsersView() {
 
     try {
       // Check if portal is authenticated
-      if (!state.authStatus.portal) {
+      if (!portalAuth || !portalSession) {
         setError('Portal authentication required. Please login first.');
         setIsLoading(false);
         return;
       }
 
-      const result = await commandFacade.portalUsers('*');
+      const result = await commandService.searchUsers('*', { limit: 100 });
       
       if (result.success && result.data) {
-        // Parse users data from CLI output
-        const usersData = Array.isArray(result.data) ? result.data : [];
-        setUsers(usersData);
-        setFilteredUsers(usersData);
+        // Use the structured result data
+        const usersData = result.data.results || [];
+        // Map PortalUser to User, providing default for optional email
+        const mappedUsers = usersData.map((u: any) => ({
+          username: u.username,
+          fullName: u.fullName || '',
+          email: u.email || '',
+          role: u.role,
+          created: u.created
+        }));
+        setUsers(mappedUsers);
+        setFilteredUsers(mappedUsers);
       } else {
         setError(result.error || 'Failed to load users');
       }
@@ -74,37 +153,10 @@ export function UsersView() {
     }
   };
 
-  // Global key handlers
-  useInput((input, key) => {
-    if (key.escape) {
-      if (mode === 'search' || mode === 'create') {
-        setMode('list');
-        setSearchTerm('');
-      } else {
-        goBack();
-      }
-    }
-    
-    if (mode === 'list') {
-      switch (input.toLowerCase()) {
-        case 's':
-          setMode('search');
-          break;
-        case 'r':
-          loadUsers();
-          break;
-        case 'c':
-          setMode('create');
-          break;
-        case 'i':
-          if (selectedUser) {
-            setSelection({ itemId: selectedUser });
-            navigate('user-detail', `User: ${selectedUser}`);
-          }
-          break;
-      }
-    }
-  });
+  // Reset current index when filtered users change
+  useEffect(() => {
+    setCurrentUserIndex(0);
+  }, [filteredUsers]);
 
   const handleUserSelect = (username: string) => {
     setSelectedUser(username);
@@ -116,7 +168,7 @@ export function UsersView() {
   };
 
   // Check authentication status
-  if (!state.authStatus.portal) {
+  if (!portalAuth || !portalSession) {
     return (
       <Box flexDirection="column" gap={1}>
         <Text bold color="yellow">Authentication Required</Text>
@@ -181,6 +233,56 @@ export function UsersView() {
     );
   }
 
+  if (mode === 'filter') {
+    const uniqueRoles = ['all', ...new Set(users.map(user => user.role))];
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="blue">Filter Users by Role</Text>
+        <Text dimColor>Current filter: {roleFilter}</Text>
+        <Box flexDirection="column" gap={1}>
+          {uniqueRoles.map(role => (
+            <Text key={role} color={role === roleFilter ? 'cyan' : 'white'}>
+              {role === roleFilter ? '▶ ' : '  '}{role} ({role === 'all' ? users.length : users.filter(u => u.role.toLowerCase() === role.toLowerCase()).length})
+            </Text>
+          ))}
+        </Box>
+        <Text dimColor>Press <Text color="cyan">Enter</Text> to apply filter, <Text color="cyan">Esc</Text> to cancel</Text>
+      </Box>
+    );
+  }
+
+  if (mode === 'confirm-delete') {
+    const userToDelete = users.find(u => u.username === selectedUser);
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="red">Confirm User Deletion</Text>
+        <Alert variant="warning" title="Destructive Action">
+          Are you sure you want to delete user '{userToDelete?.username}'?
+        </Alert>
+        <Text dimColor>This action cannot be undone.</Text>
+        <Box marginTop={1}>
+          <Text>Press <Text color="red">y</Text> to confirm, <Text color="cyan">Esc</Text> to cancel</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (mode === 'reset-password') {
+    const userToReset = users.find(u => u.username === selectedUser);
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="yellow">Reset User Password</Text>
+        <Alert variant="info" title="Password Reset">
+          Reset password for user '{userToReset?.username}'?
+        </Alert>
+        <Text dimColor>A new temporary password will be generated and sent to the user's email.</Text>
+        <Box marginTop={1}>
+          <Text>Press <Text color="green">y</Text> to confirm, <Text color="cyan">Esc</Text> to cancel</Text>
+        </Box>
+      </Box>
+    );
+  }
+
   // Prepare user options for Select component
   const userOptions = filteredUsers.map(user => ({
     label: `${user.username} (${user.fullName}) - ${user.role}`,
@@ -193,6 +295,7 @@ export function UsersView() {
       <Text dimColor>
         Found {filteredUsers.length} users
         {searchTerm && ` matching "${searchTerm}"`}
+        {roleFilter !== 'all' && ` filtered by role "${roleFilter}"`}
       </Text>
 
       {filteredUsers.length === 0 ? (
@@ -215,9 +318,12 @@ export function UsersView() {
       <Box marginTop={1} flexDirection="column">
         <Text bold>Actions:</Text>
         <Text>  <Text color="cyan">s</Text> - Search users</Text>
+        <Text>  <Text color="cyan">f</Text> - Filter by role ({roleFilter})</Text>
         <Text>  <Text color="cyan">r</Text> - Refresh list</Text>
         <Text>  <Text color="cyan">c</Text> - Create new user</Text>
         <Text>  <Text color="cyan">i</Text> - Inspect selected user</Text>
+        <Text>  <Text color="cyan">Del</Text> - Delete selected user</Text>
+        <Text>  <Text color="cyan">p</Text> - Reset password</Text>
         <Text>  <Text color="cyan">Esc</Text> - Go back</Text>
       </Box>
 

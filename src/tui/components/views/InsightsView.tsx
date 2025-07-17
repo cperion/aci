@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Box, Text } from 'ink';
 import { Spinner, Alert, Select } from '@inkjs/ui';
-import { useNavigation } from '../../hooks/navigation.js';
-import { CommandFacade } from '../../utils/commandFacade.js';
+import { useNavigation } from '../../../hooks/use-navigation.js';
+import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
+import { TuiCommandService } from '../../../services/tui-command-service.js';
+import type { CommandResult } from '../../../types/command-result.js';
 
 interface AuthFailure {
   timestamp: string;
@@ -36,7 +38,7 @@ interface ResourceTrend {
 }
 
 export function InsightsView() {
-  const { goBack, state } = useNavigation();
+  const { goBack } = useNavigation();
   const [authFailures, setAuthFailures] = useState<AuthFailure[]>([]);
   const [serviceHealth, setServiceHealth] = useState<ServiceHealth[]>([]);
   const [commandTrends, setCommandTrends] = useState<CommandTrend[]>([]);
@@ -46,7 +48,7 @@ export function InsightsView() {
   const [mode, setMode] = useState<'overview' | 'auth-failures' | 'service-health' | 'command-trends' | 'resource-trends'>('overview');
   const [timeRange, setTimeRange] = useState<'1h' | '24h' | '7d' | '30d'>('24h');
 
-  const commandFacade = CommandFacade.getInstance();
+  const commandService = useMemo(() => new TuiCommandService(), []);
 
   // Load insights data on mount
   useEffect(() => {
@@ -60,30 +62,30 @@ export function InsightsView() {
     try {
       // Load all insights data concurrently
       const [authResult, healthResult, trendsResult, resourceResult] = await Promise.allSettled([
-        commandFacade.insightsAuthFailures(timeRange),
-        commandFacade.insightsServiceHealth(timeRange),
-        commandFacade.insightsCommandTrends(timeRange),
-        commandFacade.insightsResourceTrends(timeRange)
+        commandService.getAuthFailures(timeRange),
+        commandService.getServiceHealth(timeRange),
+        commandService.getCommandTrends(timeRange),
+        commandService.getResourceTrends(timeRange)
       ]);
 
       // Process auth failures
       if (authResult.status === 'fulfilled' && authResult.value.success) {
-        setAuthFailures(Array.isArray(authResult.value.data) ? authResult.value.data : []);
+        setAuthFailures(authResult.value.data || []);
       }
 
       // Process service health
       if (healthResult.status === 'fulfilled' && healthResult.value.success) {
-        setServiceHealth(Array.isArray(healthResult.value.data) ? healthResult.value.data : []);
+        setServiceHealth(healthResult.value.data || []);
       }
 
       // Process command trends
       if (trendsResult.status === 'fulfilled' && trendsResult.value.success) {
-        setCommandTrends(Array.isArray(trendsResult.value.data) ? trendsResult.value.data : []);
+        setCommandTrends(trendsResult.value.data || []);
       }
 
       // Process resource trends
       if (resourceResult.status === 'fulfilled' && resourceResult.value.success) {
-        setResourceTrends(Array.isArray(resourceResult.value.data) ? resourceResult.value.data : []);
+        setResourceTrends(resourceResult.value.data || []);
       }
 
     } catch (err) {
@@ -93,46 +95,37 @@ export function InsightsView() {
     }
   };
 
-  // Global key handlers
-  useInput((input, key) => {
-    if (key.escape) {
-      if (mode === 'overview') {
-        goBack();
-      } else {
-        setMode('overview');
-      }
-    }
-    
-    if (mode === 'overview') {
-      switch (input.toLowerCase()) {
-        case '1':
-          setMode('auth-failures');
-          break;
-        case '2':
-          setMode('service-health');
-          break;
-        case '3':
-          setMode('command-trends');
-          break;
-        case '4':
-          setMode('resource-trends');
-          break;
-        case 'r':
-          loadInsightsData();
-          break;
-        case 't':
-          // Cycle through time ranges
+  // Set up keyboard handlers
+  useViewKeyboard({
+    deps: [mode, timeRange],
+    handlers: {
+      '1': () => {
+        if (mode === 'overview') setMode('auth-failures');
+      },
+      '2': () => {
+        if (mode === 'overview') setMode('service-health');
+      },
+      '3': () => {
+        if (mode === 'overview') setMode('command-trends');
+      },
+      '4': () => {
+        if (mode === 'overview') setMode('resource-trends');
+      },
+      r: () => loadInsightsData(),
+      t: () => {
+        if (mode === 'overview') {
           const timeRanges: Array<'1h' | '24h' | '7d' | '30d'> = ['1h', '24h', '7d', '30d'];
           const currentIndex = timeRanges.indexOf(timeRange);
           const nextIndex = (currentIndex + 1) % timeRanges.length;
           setTimeRange(timeRanges[nextIndex]!);
-          break;
-      }
-    } else {
-      switch (input.toLowerCase()) {
-        case 'r':
-          loadInsightsData();
-          break;
+        }
+      },
+      escape: () => {
+        if (mode === 'overview') {
+          goBack();
+        } else {
+          setMode('overview');
+        }
       }
     }
   });

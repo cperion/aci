@@ -1,4 +1,3 @@
-import { ArcGISRequestError } from '@esri/arcgis-rest-request';
 import { 
   AdminAuthenticationError, 
   InsufficientPrivilegesError, 
@@ -47,27 +46,9 @@ export function handleError(error: unknown, context?: string): never {
     if (error.code) {
       message += ` (Code: ${error.code})`;
     }
-  } else if (error instanceof ArcGISRequestError) {
-    // Handle ArcGIS-specific errors
-    switch (error.code) {
-      case 400:
-        message = 'Bad request - check your query parameters';
-        break;
-      case 401:
-        message = 'Authentication failed - please run "aci login"';
-        break;
-      case 403:
-        message = 'Access denied - you may not have permission to access this resource';
-        break;
-      case 404:
-        message = 'Resource not found - check the URL';
-        break;
-      case 500:
-        message = 'Server error - the service may be temporarily unavailable';
-        break;
-      default:
-        message = `ArcGIS error (${error.code}): ${error.message}`;
-    }
+  } else if (error instanceof Error && error.message.includes('ArcGIS')) {
+    // Handle our raw API errors (these now come as regular Error objects)
+    message = error.message;
   } else if (error instanceof Error) {
     message = error.message;
   } else if (typeof error === 'string') {

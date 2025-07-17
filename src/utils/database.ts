@@ -5,7 +5,7 @@ import { existsSync, mkdirSync } from 'fs';
 import type { LogEntry } from './logger.js';
 
 // Database schema version for migrations
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 // Database location
 const DB_DIR = join(homedir(), '.aci');
@@ -198,6 +198,27 @@ export class AdminDatabase {
           CREATE INDEX IF NOT EXISTS idx_service_events_time ON service_events(timestamp);
           CREATE INDEX IF NOT EXISTS idx_service_events_env ON service_events(environment);
           CREATE INDEX IF NOT EXISTS idx_service_events_service ON service_events(service_name);
+        `);
+      },
+      // Migration 1 -> 2: Add recent_items table for TUI navigation
+      () => {
+        this.db.exec(`
+          -- Recent items for TUI navigation
+          CREATE TABLE IF NOT EXISTS recent_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            item_id TEXT NOT NULL,
+            type TEXT NOT NULL CHECK (type IN ('service', 'user', 'group', 'item', 'datastore')),
+            name TEXT NOT NULL,
+            timestamp INTEGER NOT NULL,
+            view_id TEXT,
+            metadata TEXT, -- JSON
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(item_id, type) -- Prevent duplicates
+          );
+
+          -- Indexes for recent_items
+          CREATE INDEX IF NOT EXISTS idx_recent_items_timestamp ON recent_items(timestamp);
+          CREATE INDEX IF NOT EXISTS idx_recent_items_type ON recent_items(type);
         `);
       }
     ];
@@ -441,6 +462,80 @@ export class AdminDatabase {
    */
   close(): void {
     this.db.close();
+  }
+
+  /**
+   * Add recent item (with deduplication)
+   */
+  addRecentItem(item: { id: string; type: string; name: string; viewId?: string; metadata?: Record<string, any> }): void {
+    const stmt = this.db.query(`
+      INSERT OR REPLACE INTO recent_items (item_id, type, name, timestamp, view_id, metadata)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      item.id,
+      item.type,
+      item.name,
+      Date.now(),
+      item.viewId || null,
+      item.metadata ? JSON.stringify(item.metadata) : null
+    );
+  }
+
+  /**
+   * Get recent items with optional type filter
+   */
+  getRecentItems(type?: string, limit: number = 10): Array<{ id: string; type: string; name: string; timestamp: number; viewId?: string; metadata?: Record<string, any> }> {
+    let query = 'SELECT item_id as id, type, name, timestamp, view_id as viewId, metadata FROM recent_items';
+    const params: any[] = [];
+
+    if (type) {
+      query += ' WHERE type = ?';
+      params.push(type);
+    }
+
+    // Only show items from the last 7 days
+    const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+    query += type ? ' AND timestamp > ?' : ' WHERE timestamp > ?';
+    params.push(weekAgo);
+
+    query += ' ORDER BY timestamp DESC LIMIT ?';
+    params.push(limit);
+
+    const stmt = this.db.query(query);
+    const results = stmt.all(...params) as Array<{ id: string; type: string; name: string; timestamp: number; viewId?: string; metadata?: string }>;
+
+    return results.map(item => ({
+      ...item,
+      metadata: item.metadata ? JSON.parse(item.metadata) : undefined
+    }));
+  }
+
+  /**
+   * Remove recent item
+   */
+  removeRecentItem(id: string, type: string): void {
+    const stmt = this.db.query('DELETE FROM recent_items WHERE item_id = ? AND type = ?');
+    stmt.run(id, type);
+  }
+
+  /**
+   * Clear all recent items
+   */
+  clearRecentItems(): void {
+    const stmt = this.db.query('DELETE FROM recent_items');
+    stmt.run();
+  }
+
+  /**
+   * Clean old recent items (older than 7 days)
+   */
+  cleanOldRecentItems(): number {
+    const weekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+    const stmt = this.db.query('DELETE FROM recent_items WHERE timestamp < ?');
+    const result = stmt.run(weekAgo);
+    return result.changes;
   }
 
   /**

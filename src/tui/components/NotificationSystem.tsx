@@ -1,19 +1,25 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import { useTheme } from '../themes/theme-manager.js';
-import { OptimisticUIService, type NotificationMessage } from '../services/optimistic-ui.js';
+import { useNotification } from '../../hooks/use-notification.js';
 
 interface NotificationItemProps {
-  notification: NotificationMessage;
+  notification: {
+    id: string;
+    type: 'success' | 'error' | 'warning' | 'info';
+    message: string;
+    title?: string;
+    duration?: number;
+  };
   onDismiss: (id: string) => void;
 }
 
 function NotificationItem({ notification, onDismiss }: NotificationItemProps) {
   const { colors } = useTheme();
   
-  const getNotificationColor = (type: NotificationMessage['type']) => {
+  const getNotificationColor = (type: NotificationItemProps['notification']['type']) => {
     switch (type) {
-      case 'success': return colors.successes;
+      case 'success': return colors.success;
       case 'error': return colors.errors;
       case 'warning': return colors.warnings;
       case 'info': return colors.metadata;
@@ -21,7 +27,7 @@ function NotificationItem({ notification, onDismiss }: NotificationItemProps) {
     }
   };
 
-  const getIcon = (type: NotificationMessage['type']) => {
+  const getIcon = (type: NotificationItemProps['notification']['type']) => {
     switch (type) {
       case 'success': return '✓';
       case 'error': return '✗';
@@ -51,11 +57,13 @@ function NotificationItem({ notification, onDismiss }: NotificationItemProps) {
       marginBottom={1}
     >
       <Box flexDirection="column" width="100%">
-        <Box>
-          <Text color={getNotificationColor(notification.type)} bold>
-            {getIcon(notification.type)} {notification.title}
-          </Text>
-        </Box>
+        {notification.title && (
+          <Box>
+            <Text color={getNotificationColor(notification.type)} bold>
+              {getIcon(notification.type)} {notification.title}
+            </Text>
+          </Box>
+        )}
         <Box>
           <Text color={colors.primaryText}>
             {notification.message}
@@ -75,29 +83,12 @@ export function NotificationSystem({
   position = 'top-right',
   maxNotifications = 5 
 }: NotificationSystemProps) {
-  const [notifications, setNotifications] = useState<NotificationMessage[]>([]);
+  const { notifications, removeNotification } = useNotification();
   
-  // Use singleton reference to prevent re-render loops
-  const optimisticUI = React.useMemo(() => OptimisticUIService.getInstance(), []);
+  // Limit the number of notifications displayed
+  const displayNotifications = notifications.slice(-maxNotifications);
 
-  useEffect(() => {
-    // Subscribe to notification changes
-    const unsubscribe = optimisticUI.onNotificationsChange((newNotifications) => {
-      // Limit the number of notifications displayed
-      setNotifications(newNotifications.slice(-maxNotifications));
-    });
-
-    // Get initial notifications
-    setNotifications(optimisticUI.getNotifications().slice(-maxNotifications));
-
-    return unsubscribe;
-  }, [maxNotifications, optimisticUI]);
-
-  const handleDismiss = (id: string) => {
-    optimisticUI.removeNotification(id);
-  };
-
-  if (notifications.length === 0) {
+  if (displayNotifications.length === 0) {
     return null;
   }
 
@@ -115,11 +106,11 @@ export function NotificationSystem({
       width={40}
       {...positionStyles[position]}
     >
-      {notifications.map((notification) => (
+      {displayNotifications.map((notification: any) => (
         <NotificationItem
           key={notification.id}
           notification={notification}
-          onDismiss={handleDismiss}
+          onDismiss={removeNotification}
         />
       ))}
     </Box>
@@ -128,35 +119,6 @@ export function NotificationSystem({
 
 /**
  * Hook for easy notification management
+ * Re-exports the useNotification hook for convenience
  */
-export function useNotifications() {
-  const optimisticUI = OptimisticUIService.getInstance();
-
-  const showSuccess = (title: string, message: string, duration?: number) => {
-    return optimisticUI.showNotification({ type: 'success', title, message, duration });
-  };
-
-  const showError = (title: string, message: string, duration?: number) => {
-    return optimisticUI.showNotification({ type: 'error', title, message, duration });
-  };
-
-  const showWarning = (title: string, message: string, duration?: number) => {
-    return optimisticUI.showNotification({ type: 'warning', title, message, duration });
-  };
-
-  const showInfo = (title: string, message: string, duration?: number) => {
-    return optimisticUI.showNotification({ type: 'info', title, message, duration });
-  };
-
-  const clearAll = () => {
-    optimisticUI.clearNotifications();
-  };
-
-  return {
-    showSuccess,
-    showError,
-    showWarning,
-    showInfo,
-    clearAll
-  };
-}
+export { useNotification as useNotifications } from '../../hooks/use-notification.js';

@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { useTheme } from '../themes/theme-manager.js';
-import { useOptimistic } from '../contexts/OptimisticContext.js';
+import { useNotification } from '../../hooks/use-notification.js';
 
 interface SimpleNotificationsProps {
   position?: 'top-right' | 'bottom-right' | 'top-left' | 'bottom-left';
@@ -9,7 +9,7 @@ interface SimpleNotificationsProps {
 
 export function SimpleNotifications({ position = 'top-right' }: SimpleNotificationsProps) {
   const { colors } = useTheme();
-  const { notifications, removeNotification } = useOptimistic();
+  const { notifications, removeNotification } = useNotification();
 
   if (notifications.length === 0) {
     return null;
@@ -27,7 +27,7 @@ export function SimpleNotifications({ position = 'top-right' }: SimpleNotificati
 
   const getColor = (type: string) => {
     switch (type) {
-      case 'success': return colors.successes;
+      case 'success': return colors.success;
       case 'error': return colors.errors;
       case 'warning': return colors.warnings;
       case 'info': return colors.metadata;
@@ -48,14 +48,13 @@ export function SimpleNotifications({ position = 'top-right' }: SimpleNotificati
       width={40}
       {...positionStyles[position]}
     >
-      {notifications.map((notification) => (
+      {notifications.map((notification: any) => (
         <Box
           key={notification.id}
           borderStyle="round"
           borderColor={getColor(notification.type)}
           paddingX={1}
           marginBottom={1}
-          backgroundColor={colors.backgroundSecondary}
         >
           <Text color={getColor(notification.type)} bold>
             {getIcon(notification.type)} {notification.message}

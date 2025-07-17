@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Box, Text } from 'ink';
 import { TextInput, Spinner, Alert, Select } from '@inkjs/ui';
-import { useNavigation } from '../../hooks/navigation.js';
-import { CommandFacade } from '../../utils/commandFacade.js';
+import { useNavigation } from '../../../hooks/use-navigation.js';
+import { useAuth } from '../../../hooks/use-auth.js';
+import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
+import { TuiCommandService } from '../../../services/tui-command-service.js';
+import type { CommandResult, GroupSearchResult } from '../../../types/command-result.js';
 
 interface Group {
   id: string;
@@ -17,36 +20,107 @@ interface Group {
 }
 
 export function GroupsView() {
-  const { goBack, navigate, setSelection, state } = useNavigation();
+  const { goBack, navigate } = useNavigation();
+  const { authState } = useAuth();
+  const { portal: portalAuth, portalSession } = authState;
   const [groups, setGroups] = useState<Group[]>([]);
   const [filteredGroups, setFilteredGroups] = useState<Group[]>([]);
+  const [currentGroupIndex, setCurrentGroupIndex] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGroup, setSelectedGroup] = useState<string>('');
+  const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
-  const [mode, setMode] = useState<'list' | 'search' | 'create'>('list');
+  const [mode, setMode] = useState<'list' | 'search' | 'create' | 'filter' | 'confirm-delete' | 'members'>('list');
+  const [accessFilter, setAccessFilter] = useState<string>('all');
 
-  const commandFacade = CommandFacade.getInstance();
+  const commandService = useMemo(() => new TuiCommandService(portalSession || undefined), [portalSession]);
+
+  // Register keyboard handlers
+  useViewKeyboard({
+    viewId: 'groups',
+    handlers: {
+      moveDown: () => {
+        setCurrentGroupIndex(prev => Math.min(prev + 1, filteredGroups.length - 1));
+      },
+      moveUp: () => {
+        setCurrentGroupIndex(prev => Math.max(prev - 1, 0));
+      },
+      delete: () => {
+        const currentGroup = filteredGroups[currentGroupIndex];
+        if (currentGroup) {
+          setError('');
+          setMode('confirm-delete');
+          setSelectedGroup(currentGroup.id);
+        }
+      },
+      enter: () => {
+        const currentGroup = filteredGroups[currentGroupIndex];
+        if (currentGroup) {
+          navigate('group-detail', `Group: ${currentGroup.title}`, { groupId: currentGroup.id });
+        }
+      },
+      s: () => setMode('search'),
+      f: () => setMode('filter'),
+      c: () => setMode('create'),
+      m: () => {
+        const currentGroup = filteredGroups[currentGroupIndex];
+        if (currentGroup) {
+          setMode('members');
+          setSelectedGroup(currentGroup.id);
+        }
+      },
+      r: () => loadGroups(),
+      escape: () => {
+        if (mode !== 'list') {
+          setMode('list');
+        } else {
+          goBack();
+        }
+      },
+      space: () => {
+        const currentGroup = filteredGroups[currentGroupIndex];
+        if (currentGroup) {
+          setSelectedGroups(prev => {
+            const isSelected = prev.includes(currentGroup.id);
+            return isSelected 
+              ? prev.filter(g => g !== currentGroup.id)
+              : [...prev, currentGroup.id];
+          });
+        }
+      }
+    }
+  }, [filteredGroups, currentGroupIndex, mode]);
 
   // Load groups on mount
   useEffect(() => {
     loadGroups();
   }, []);
 
-  // Filter groups when search term changes
+  // Reset current index when filtered groups change
   useEffect(() => {
-    if (!searchTerm.trim()) {
-      setFilteredGroups(groups);
-    } else {
-      const filtered = groups.filter(group =>
+    setCurrentGroupIndex(0);
+  }, [filteredGroups]);
+
+  // Filter groups when search term or access filter changes
+  useEffect(() => {
+    let filtered = groups;
+    
+    if (searchTerm.trim()) {
+      filtered = filtered.filter(group =>
         group.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
         group.description.toLowerCase().includes(searchTerm.toLowerCase()) ||
         group.owner.toLowerCase().includes(searchTerm.toLowerCase()) ||
         group.tags.some(tag => tag.toLowerCase().includes(searchTerm.toLowerCase()))
       );
-      setFilteredGroups(filtered);
     }
-  }, [searchTerm, groups]);
+    
+    if (accessFilter !== 'all') {
+      filtered = filtered.filter(group => group.access === accessFilter);
+    }
+    
+    setFilteredGroups(filtered);
+  }, [searchTerm, groups, accessFilter]);
 
   const loadGroups = async () => {
     setIsLoading(true);
@@ -54,17 +128,28 @@ export function GroupsView() {
 
     try {
       // Check if portal is authenticated
-      if (!state.authStatus.portal) {
+      if (!portalAuth || !portalSession) {
         setError('Portal authentication required. Please login first.');
         setIsLoading(false);
         return;
       }
 
-      const result = await commandFacade.portalGroups('*');
+      const result = await commandService.searchGroups('*', { limit: 100 });
       
       if (result.success && result.data) {
-        // Parse groups data from CLI output
-        const groupsData = Array.isArray(result.data) ? result.data : [];
+        // Use the structured result data and map to Group interface
+        const portalGroups = result.data.results || [];
+        const groupsData: Group[] = portalGroups.map(pg => ({
+          id: pg.id,
+          title: pg.title,
+          description: pg.description || '',
+          owner: pg.owner,
+          memberCount: 0, // Not provided by PortalGroup
+          tags: [], // Not provided by PortalGroup
+          created: pg.created,
+          modified: pg.modified,
+          access: pg.access
+        }));
         setGroups(groupsData);
         setFilteredGroups(groupsData);
       } else {
@@ -77,37 +162,6 @@ export function GroupsView() {
     }
   };
 
-  // Global key handlers
-  useInput((input, key) => {
-    if (key.escape) {
-      if (mode === 'search' || mode === 'create') {
-        setMode('list');
-        setSearchTerm('');
-      } else {
-        goBack();
-      }
-    }
-    
-    if (mode === 'list') {
-      switch (input.toLowerCase()) {
-        case 's':
-          setMode('search');
-          break;
-        case 'r':
-          loadGroups();
-          break;
-        case 'c':
-          setMode('create');
-          break;
-        case 'i':
-          if (selectedGroup) {
-            setSelection({ itemId: selectedGroup });
-            navigate('group-detail', `Group: ${selectedGroup}`);
-          }
-          break;
-      }
-    }
-  });
 
   const handleGroupSelect = (groupId: string) => {
     setSelectedGroup(groupId);
@@ -119,7 +173,7 @@ export function GroupsView() {
   };
 
   // Check authentication status
-  if (!state.authStatus.portal) {
+  if (!portalAuth || !portalSession) {
     return (
       <Box flexDirection="column" gap={1}>
         <Text bold color="yellow">Authentication Required</Text>
@@ -184,6 +238,54 @@ export function GroupsView() {
     );
   }
 
+  if (mode === 'filter') {
+    const accessLevels = ['all', 'private', 'org', 'public'];
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="blue">Filter Groups by Access</Text>
+        <Text dimColor>Current filter: {accessFilter}</Text>
+        <Box flexDirection="column" gap={1}>
+          {accessLevels.map(access => (
+            <Text key={access} color={access === accessFilter ? 'cyan' : 'white'}>
+              {access === accessFilter ? '▶ ' : '  '}{access} ({access === 'all' ? groups.length : groups.filter(g => g.access === access).length})
+            </Text>
+          ))}
+        </Box>
+        <Text dimColor>Press <Text color="cyan">Enter</Text> to apply filter, <Text color="cyan">Esc</Text> to cancel</Text>
+      </Box>
+    );
+  }
+
+  if (mode === 'confirm-delete') {
+    const groupToDelete = groups.find(g => g.id === selectedGroup);
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="red">Confirm Group Deletion</Text>
+        <Alert variant="warning" title="Destructive Action">
+          Are you sure you want to delete group '{groupToDelete?.title}'?
+        </Alert>
+        <Text dimColor>This will remove {groupToDelete?.memberCount || 0} members from the group.</Text>
+        <Box marginTop={1}>
+          <Text>Press <Text color="red">y</Text> to confirm, <Text color="cyan">Esc</Text> to cancel</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (mode === 'members') {
+    const selectedGroupData = groups.find(g => g.id === selectedGroup);
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="blue">Group Members: {selectedGroupData?.title}</Text>
+        <Text dimColor>Total members: {selectedGroupData?.memberCount || 0}</Text>
+        <Alert variant="info" title="Feature Coming Soon">
+          Member management functionality will be available in the next update.
+        </Alert>
+        <Text dimColor>Press <Text color="cyan">Esc</Text> to go back</Text>
+      </Box>
+    );
+  }
+
   // Prepare group options for Select component
   const groupOptions = filteredGroups.map(group => ({
     label: `${group.title} (${group.memberCount} members) - ${group.access}`,
@@ -196,6 +298,7 @@ export function GroupsView() {
       <Text dimColor>
         Found {filteredGroups.length} groups
         {searchTerm && ` matching "${searchTerm}"`}
+        {accessFilter !== 'all' && ` filtered by access "${accessFilter}"`}
       </Text>
 
       {filteredGroups.length === 0 ? (
@@ -241,9 +344,12 @@ export function GroupsView() {
       <Box marginTop={1} flexDirection="column">
         <Text bold>Actions:</Text>
         <Text>  <Text color="cyan">s</Text> - Search groups</Text>
+        <Text>  <Text color="cyan">f</Text> - Filter by access ({accessFilter})</Text>
         <Text>  <Text color="cyan">r</Text> - Refresh list</Text>
         <Text>  <Text color="cyan">c</Text> - Create new group</Text>
+        <Text>  <Text color="cyan">m</Text> - View members</Text>
         <Text>  <Text color="cyan">i</Text> - Inspect selected group</Text>
+        <Text>  <Text color="cyan">Del</Text> - Delete selected group</Text>
         <Text>  <Text color="cyan">Esc</Text> - Go back</Text>
       </Box>
 

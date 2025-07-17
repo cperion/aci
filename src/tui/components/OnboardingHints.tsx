@@ -125,7 +125,9 @@ export function OnboardingHints({ currentView, userInteractions }: OnboardingHin
   // Load shown hints from localStorage with validation
   useEffect(() => {
     try {
-      const stored = localStorage.getItem('aci-onboarding-hints');
+      // Check if localStorage is available (browser environment)
+      if (typeof window !== 'undefined' && window.localStorage) {
+        const stored = localStorage.getItem('aci-onboarding-hints');
       if (stored) {
         const parsed = JSON.parse(stored);
         
@@ -144,6 +146,7 @@ export function OnboardingHints({ currentView, userInteractions }: OnboardingHin
           localStorage.removeItem('aci-onboarding-hints');
         }
       }
+    }
     } catch (error) {
       console.warn('Could not load onboarding hints state:', error);
       // Clear corrupted data
@@ -159,7 +162,10 @@ export function OnboardingHints({ currentView, userInteractions }: OnboardingHin
   const debouncedSaveToStorage = React.useCallback(
     debounce((hints: string[]) => {
       try {
-        localStorage.setItem('aci-onboarding-hints', JSON.stringify(hints));
+        // Check if localStorage is available (browser environment)
+        if (typeof window !== 'undefined' && window.localStorage) {
+          localStorage.setItem('aci-onboarding-hints', JSON.stringify(hints));
+        }
       } catch (error) {
         console.warn('Could not save onboarding hints state:', error);
       }
@@ -196,7 +202,9 @@ export function OnboardingHints({ currentView, userInteractions }: OnboardingHin
         return priorityOrder[b.priority] - priorityOrder[a.priority];
       })[0];
 
-      showHint(hintToShow);
+      if (hintToShow) {
+        showHint(hintToShow);
+      }
     }
   }, [currentView, shownHints]);
 
@@ -209,7 +217,10 @@ export function OnboardingHints({ currentView, userInteractions }: OnboardingHin
       );
 
       if (selectionHints.length > 0) {
-        showHint(selectionHints[0]);
+        const firstHint = selectionHints[0];
+        if (firstHint) {
+          showHint(firstHint);
+        }
       }
     }
   }, [userInteractions.hasSelectedItems, shownHints]);
@@ -224,7 +235,9 @@ export function OnboardingHints({ currentView, userInteractions }: OnboardingHin
 
       if (idleHints.length > 0) {
         const randomHint = idleHints[Math.floor(Math.random() * idleHints.length)];
-        showHint(randomHint);
+        if (randomHint) {
+          showHint(randomHint);
+        }
       }
     }
   }, [userInteractions.timeOnView, userInteractions.hasUsedKeyboard, shownHints]);
@@ -283,11 +296,7 @@ export function OnboardingHints({ currentView, userInteractions }: OnboardingHin
 
   return (
     <Box
-      position="absolute"
-      bottom={3}
-      left={2}
       width={60}
-      backgroundColor={colors.backgroundSecondary}
       borderStyle="round"
       borderColor={getBorderColor(currentHint.priority)}
       flexDirection="column"
@@ -351,7 +360,7 @@ export function useOnboarding() {
     }));
   };
 
-  const resetViewTracking = () => {
+  const resetViewTracking = React.useCallback(() => {
     setViewStartTime(Date.now());
     setUserInteractions(prev => ({
       ...prev,
@@ -359,7 +368,7 @@ export function useOnboarding() {
       hasSelectedItems: false,
       hasUsedKeyboard: false
     }));
-  };
+  }, []);
 
   const updateTimeOnView = () => {
     setUserInteractions(prev => ({

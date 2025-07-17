@@ -9,7 +9,8 @@ import type {
   RawHealthResponse,
   DataStoreType,
   DataStoreStatus,
-  MachineRole
+  MachineRole,
+  DataStoreRegistrationConfig
 } from '../types/datastore.js';
 import { 
   DataStoreNotFoundError, 
@@ -209,16 +210,33 @@ export class ArcGISServerAdminClient {
   /**
    * Get server logs with filtering
    */
-  async getLogs(tail: number = 100, level?: string): Promise<LogEntry[]> {
+  async getLogs(tail: number = 100, level?: string, services?: string[]): Promise<LogEntry[]> {
     try {
-      const params: Record<string, string> = {
-        pageSize: tail.toString(),
-        f: 'json'
+      // Complete filter object matching Manager interface format
+      const filter: any = {
+        codes: [],
+        processIds: [],
+        requestIds: [],
+        services: services || ["*"],
+        machines: ["*"],
+        users: [],
+        component: "*"
       };
       
-      if (level) {
-        params.level = level.toUpperCase();
-      }
+      // Time range: last 24 hours by default
+      const endTime = Date.now();
+      const startTime = endTime - (24 * 60 * 60 * 1000); // 24 hours ago
+      
+      const params: Record<string, string> = {
+        filterType: 'json',  // REQUIRED by Manager interface
+        filter: JSON.stringify(filter),
+        level: level || 'WARNING',
+        startTime: startTime.toString(),
+        endTime: endTime.toString(),
+        pageSize: Math.min(tail, 1000).toString(), // Cap at 1000 like Manager
+        f: 'json',
+        'dojo.preventCache': Date.now().toString()
+      };
       
       const response = await this.request('logs/query', 'GET', params);
       
@@ -226,6 +244,70 @@ export class ArcGISServerAdminClient {
         return [];
       }
       
+      return response.logMessages.map((msg: any): LogEntry => ({
+        time: msg.time,
+        level: msg.level,
+        message: msg.message,
+        source: msg.source,
+        thread: msg.thread
+      }));
+      
+    } catch (error) {
+      throw new ServiceOperationError(
+        `Failed to get logs: ${(error as Error).message}`
+      );
+    }
+  }
+
+  /**
+   * Get server logs with extended time range options
+   */
+  async getLogsExtended(options: {
+    tail?: number;
+    level?: string;
+    services?: string[];
+    hours?: number;
+    sinceServerStart?: boolean;
+  }): Promise<LogEntry[]> {
+    try {
+      const { tail = 100, level, services, hours = 24, sinceServerStart = false } = options;
+      
+      // Complete filter object
+      const filter: any = {
+        codes: [],
+        processIds: [],
+        requestIds: [],
+        services: services || ["*"],
+        machines: ["*"],
+        users: [],
+        component: "*"
+      };
+      
+      const params: Record<string, string> = {
+        filterType: 'json',
+        filter: JSON.stringify(filter),
+        level: level || 'WARNING',
+        pageSize: Math.min(tail, 1000).toString(),
+        f: 'json',
+        'dojo.preventCache': Date.now().toString()
+      };
+      
+      // Set time range based on options
+      if (sinceServerStart) {
+        params.sinceServerStart = 'TRUE';
+      } else {
+        const endTime = Date.now();
+        const startTime = endTime - (hours * 60 * 60 * 1000);
+        params.startTime = startTime.toString();
+        params.endTime = endTime.toString();
+      }
+      
+      const response = await this.request('logs/query', 'GET', params);
+      
+      if (!response.logMessages) {
+        return [];
+      }
+
       return response.logMessages.map((msg: any): LogEntry => ({
         time: msg.time,
         level: msg.level,
@@ -250,32 +332,34 @@ export class ArcGISServerAdminClient {
    */
   async listDatastores(): Promise<DataStoreInfo[]> {
     try {
-      const response: RawDataStoreResponse = await this.request('data');
+      // Use the findItems endpoint that actually works and returns real data
+      const response = await this.request('data/findItems', 'GET', { types: 'egdb' });
       
-      if (!response.datastores) {
+      if (!response.items) {
         return [];
       }
       
       const datastores: DataStoreInfo[] = [];
       
-      for (const store of response.datastores) {
+      // Process each datastore item
+      for (const item of response.items) {
         const datastoreInfo: DataStoreInfo = {
-          name: store.name,
-          type: this.normalizeDataStoreType(store.type),
-          provider: store.provider,
+          name: item.path.split('/').pop(), // Extract name from path
+          type: this.normalizeDataStoreType(item.type),
+          provider: item.provider,
           status: 'Healthy', // Default - will be updated with health check
-          path: store.path,
-          onServerStart: store.onServerStart ?? false,
-          isManaged: store.isManaged ?? false
+          path: item.path,
+          onServerStart: item.info?.onServerStart ?? false,
+          isManaged: item.info?.isManaged ?? false
         };
         
-        // Quick health check to get actual status
+        // Try to get health information
         try {
-          const health = await this.getDataStoreQuickHealth(store.name, store.path);
+          const health = await this.getDataStoreQuickHealth(datastoreInfo.name, item.path);
           datastoreInfo.status = health.status;
           datastoreInfo.machineCount = health.machines?.length;
-        } catch (error) {
-          // If health check fails, mark as unhealthy but continue
+        } catch (healthError) {
+          // Health check failed, keep defaults
           datastoreInfo.status = 'Unhealthy';
           datastoreInfo.connectionStatus = 'Failed to connect';
         }
@@ -397,13 +481,13 @@ export class ArcGISServerAdminClient {
    * Find a data store by name from the registry
    */
   private async findDataStore(name: string): Promise<{ path: string; type: DataStoreType }> {
-    const response: RawDataStoreResponse = await this.request('data');
+    const response = await this.request('data/findItems', 'GET', { types: 'egdb' });
     
-    if (!response.datastores) {
+    if (!response.items) {
       throw new DataStoreNotFoundError(name);
     }
     
-    const store = response.datastores.find(s => s.name === name);
+    const store = response.items.find(s => s.path.split('/').pop() === name);
     if (!store) {
       throw new DataStoreNotFoundError(name);
     }
@@ -634,6 +718,124 @@ export class ArcGISServerAdminClient {
         throw error;
       }
       throw new Error(`Request failed: ${String(error)}`);
+    }
+  }
+
+  /**
+   * Register a new data store with the ArcGIS Server
+   */
+  async registerDatastore(config: DataStoreRegistrationConfig): Promise<DataStoreInfo> {
+    const endpoint = this.getDataStoreEndpoint(config.type);
+    
+    const params = {
+      name: config.name,
+      f: 'json',
+      token: this.session.adminToken,
+      ...config.connectionParams
+    };
+
+    const response = await this.request(endpoint, 'POST', params);
+    
+    if (response.error) {
+      throw new Error(`Failed to register datastore: ${response.error.message}`);
+    }
+
+    // Return the registered datastore info
+    return {
+      name: config.name,
+      type: config.type,
+      provider: config.provider,
+      status: 'Healthy',
+      path: `/data/items/${config.name}`,
+      onServerStart: config.onServerStart || false,
+      isManaged: config.isManaged || false
+    };
+  }
+
+  /**
+   * Unregister a data store from the ArcGIS Server
+   */
+  async unregisterDatastore(name: string): Promise<void> {
+    // First get the datastore info to determine the correct endpoint
+    const stores = await this.listDatastores();
+    const store = stores.find(s => s.name === name);
+    
+    if (!store) {
+      throw new Error(`Data store '${name}' not found`);
+    }
+
+    const endpoint = `data/items${store.path}/unregister`;
+    
+    const params = {
+      f: 'json',
+      token: this.session.adminToken
+    };
+
+    const response = await this.request(endpoint, 'POST', params);
+    
+    if (response.error) {
+      throw new Error(`Failed to unregister datastore: ${response.error.message}`);
+    }
+  }
+
+  /**
+   * Update data store configuration
+   */
+  async updateDatastore(name: string, config: Partial<DataStoreRegistrationConfig>): Promise<DataStoreInfo> {
+    // First get the datastore info to determine the correct endpoint
+    const stores = await this.listDatastores();
+    const store = stores.find(s => s.name === name);
+    
+    if (!store) {
+      throw new Error(`Data store '${name}' not found`);
+    }
+
+    const endpoint = `data/items${store.path}/edit`;
+    
+    const params = {
+      f: 'json',
+      token: this.session.adminToken,
+      ...config.connectionParams
+    };
+
+    const response = await this.request(endpoint, 'POST', params);
+    
+    if (response.error) {
+      throw new Error(`Failed to update datastore: ${response.error.message}`);
+    }
+
+    // Return updated datastore info
+    return {
+      ...store,
+      ...config
+    };
+  }
+
+  /**
+   * Get the appropriate endpoint for data store operations based on type
+   */
+  private getDataStoreEndpoint(type: DataStoreType): string {
+    switch (type) {
+      case 'enterprise':
+        return 'data/items/enterpriseDatabases/register';
+      case 'cloud':
+        return 'data/items/cloudStores/register';
+      case 'relational':
+        return 'data/items/relationaldatastores/register';
+      case 'tileCache':
+        return 'data/items/tilecachedatastores/register';
+      case 'spatiotemporal':
+        return 'data/items/nosqlDatabases/register';
+      case 'graph':
+        return 'data/items/graphdatastores/register';
+      case 'object':
+        return 'data/items/objectdatastores/register';
+      case 'fileShare':
+        return 'data/items/folderDatastores/register';
+      case 'raster':
+        return 'data/items/rasterdatastores/register';
+      default:
+        return 'data/items/enterpriseDatabases/register';
     }
   }
 }

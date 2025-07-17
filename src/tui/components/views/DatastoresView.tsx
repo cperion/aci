@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Box, Text } from 'ink';
 import { Spinner, Alert, Select } from '@inkjs/ui';
-import { useNavigation } from '../../hooks/navigation.js';
-import { CommandFacade } from '../../utils/commandFacade.js';
+import { useNavigation } from '../../../hooks/use-navigation.js';
+import { useAuth } from '../../../hooks/use-auth.js';
+import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
+import { TuiCommandService } from '../../../services/tui-command-service.js';
+import type { CommandResult } from '../../../types/command-result.js';
 
 interface Datastore {
   id: string;
@@ -27,7 +30,10 @@ interface ValidationResult {
 }
 
 export function DatastoresView() {
-  const { goBack, navigate, setSelection, state } = useNavigation();
+  const { goBack, navigate } = useNavigation();
+  const { authState } = useAuth();
+  const { portal: portalAuth, admin: adminAuth, portalSession, adminSession } = authState;
+  const [selection, setSelection] = useState<{ datastoreId?: string }>({});
   const [datastores, setDatastores] = useState<Datastore[]>([]);
   const [validationResults, setValidationResults] = useState<ValidationResult[]>([]);
   const [selectedDatastore, setSelectedDatastore] = useState<string>('');
@@ -35,7 +41,7 @@ export function DatastoresView() {
   const [error, setError] = useState('');
   const [mode, setMode] = useState<'list' | 'validate' | 'health' | 'details'>('list');
 
-  const commandFacade = CommandFacade.getInstance();
+  const commandService = useMemo(() => new TuiCommandService(portalSession || undefined), [portalSession]);
 
   // Load datastores on mount
   useEffect(() => {
@@ -48,17 +54,16 @@ export function DatastoresView() {
 
     try {
       // Check if admin is authenticated for some datastore operations
-      if (!state.authStatus.admin && !state.authStatus.portal) {
+      if (!adminAuth && !portalAuth) {
         setError('Authentication required. Please login to view datastores.');
         setIsLoading(false);
         return;
       }
 
-      const result = await commandFacade.datastoresList();
+      const result: CommandResult<Datastore[]> = await commandService.listDatastores();
       
       if (result.success && result.data) {
-        const datastoresData = Array.isArray(result.data) ? result.data : [];
-        setDatastores(datastoresData);
+        setDatastores(result.data);
       } else {
         setError(result.error || 'Failed to load datastores');
       }
@@ -74,11 +79,10 @@ export function DatastoresView() {
     setError('');
 
     try {
-      const result = await commandFacade.datastoresValidate();
+      const result: CommandResult<ValidationResult[]> = await commandService.validateDatastores();
       
       if (result.success && result.data) {
-        const validationData = Array.isArray(result.data) ? result.data : [result.data];
-        setValidationResults(validationData);
+        setValidationResults(result.data);
       } else {
         setError(result.error || 'Failed to validate datastores');
       }
@@ -94,14 +98,20 @@ export function DatastoresView() {
     setError('');
 
     try {
-      const result = await commandFacade.datastoresHealth();
+      // For now, check health of the selected datastore only
+      if (!selectedDatastore) {
+        setError('Please select a datastore to check health');
+        setIsLoading(false);
+        return;
+      }
+      
+      const result: CommandResult<any> = await commandService.checkDatastoreHealth(selectedDatastore);
       
       if (result.success && result.data) {
         // Update datastores with health information
-        const healthData = Array.isArray(result.data) ? result.data : [result.data];
         setDatastores(prev => prev.map(ds => {
-          const health = healthData.find((h: any) => h.id === ds.id);
-          return health ? { ...ds, health: health.status } : ds;
+          const health = result.data!.find((h: any) => h.id === ds.id);
+          return health ? { ...ds, health: health.status as any } : ds;
         }));
       } else {
         setError(result.error || 'Failed to check datastore health');
@@ -113,47 +123,43 @@ export function DatastoresView() {
     }
   };
 
-  // Global key handlers
-  useInput((input, key) => {
-    if (key.escape) {
-      if (mode === 'list') {
-        goBack();
-      } else {
-        setMode('list');
-      }
-    }
-    
-    if (mode === 'list') {
-      switch (input.toLowerCase()) {
-        case 'v':
+  // Set up keyboard handlers
+  useViewKeyboard({
+    deps: [mode, selectedDatastore],
+    handlers: {
+      v: () => {
+        if (mode === 'list') {
           setMode('validate');
           validateDatastores();
-          break;
-        case 'h':
+        }
+      },
+      h: () => {
+        if (mode === 'list') {
           setMode('health');
           checkHealth();
-          break;
-        case 'r':
+        }
+      },
+      r: () => {
+        if (mode === 'validate') {
+          validateDatastores();
+        } else if (mode === 'health') {
+          checkHealth();
+        } else {
           loadDatastores();
-          break;
-        case 'i':
-          if (selectedDatastore) {
-            setSelection({ datastoreId: selectedDatastore });
-            setMode('details');
-          }
-          break;
-      }
-    } else {
-      switch (input.toLowerCase()) {
-        case 'r':
-          if (mode === 'validate') {
-            validateDatastores();
-          } else if (mode === 'health') {
-            checkHealth();
-          } else {
-            loadDatastores();
-          }
-          break;
+        }
+      },
+      i: () => {
+        if (mode === 'list' && selectedDatastore) {
+          setSelection({ datastoreId: selectedDatastore });
+          setMode('details');
+        }
+      },
+      escape: () => {
+        if (mode === 'list') {
+          goBack();
+        } else {
+          setMode('list');
+        }
       }
     }
   });
@@ -163,7 +169,7 @@ export function DatastoresView() {
   };
 
   // Check authentication status
-  if (!state.authStatus.admin && !state.authStatus.portal) {
+  if (!adminAuth && !portalAuth) {
     return (
       <Box flexDirection="column" gap={1}>
         <Text bold color="yellow">Authentication Required</Text>
@@ -388,7 +394,7 @@ export function DatastoresView() {
         <Text bold>Summary:</Text>
         <Text>Connected: {datastores.filter(d => d.status === 'connected').length}</Text>
         <Text>Types: {[...new Set(datastores.map(d => d.type))].join(', ')}</Text>
-        <Text>Auth: {state.authStatus.admin ? 'Admin' : 'Portal'}</Text>
+        <Text>Auth: {adminAuth ? 'Admin' : 'Portal'}</Text>
       </Box>
     </Box>
   );

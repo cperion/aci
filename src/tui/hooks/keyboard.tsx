@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from 'react';
 import { useInput } from 'ink';
 import { KeymapRegistry } from '../keyboard/keymap-registry.js';
 import { ActionProcessor, type ActionContext } from '../keyboard/action-processor.js';
@@ -50,8 +50,8 @@ export function KeyboardProvider({
   // selectedItems is now derived from viewState to avoid sync issues
   const selectedItems = viewState.selectedItems;
 
-  const keymapRegistry = KeymapRegistry.getInstance();
-  const actionProcessor = ActionProcessor.getInstance();
+  const keymapRegistry = useMemo(() => KeymapRegistry.getInstance(), []);
+  const actionProcessor = useMemo(() => ActionProcessor.getInstance(), []);
 
   // Register keymaps on mount
   useEffect(() => {
@@ -65,7 +65,7 @@ export function KeyboardProvider({
     keymapRegistry.registerViewKeymap(loginKeymap);
     keymapRegistry.registerViewKeymap(datastoresKeymap);
     keymapRegistry.registerViewKeymap(insightsKeymap);
-  }, [keymapRegistry]);
+  }, []);
 
   // Update view state when viewId changes
   useEffect(() => {

@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Box, Text } from 'ink';
 import { TextInput, Spinner, Alert, Select } from '@inkjs/ui';
-import { useNavigation } from '../../hooks/navigation.js';
-import { CommandFacade } from '../../utils/commandFacade.js';
+import { useNavigation } from '../../../hooks/use-navigation.js';
+import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
+import { TuiCommandService } from '../../../services/tui-command-service.js';
+import type { CommandResult } from '../../../types/command-result.js';
 
 interface DatabaseSchema {
   tableName: string;
@@ -23,7 +25,7 @@ interface AnalysisTemplate {
 }
 
 export function AnalyticsView() {
-  const { goBack, state } = useNavigation();
+  const { goBack } = useNavigation();
   const [schemas, setSchemas] = useState<DatabaseSchema[]>([]);
   const [templates, setTemplates] = useState<AnalysisTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');
@@ -33,7 +35,7 @@ export function AnalyticsView() {
   const [error, setError] = useState('');
   const [mode, setMode] = useState<'overview' | 'templates' | 'sql' | 'schema'>('overview');
 
-  const commandFacade = CommandFacade.getInstance();
+  const commandService = useMemo(() => new TuiCommandService(), []);
 
   // Load analytics data on mount
   useEffect(() => {
@@ -46,15 +48,15 @@ export function AnalyticsView() {
 
     try {
       // Load database schema
-      const schemaResult = await commandFacade.analyzeSchema();
+      const schemaResult: CommandResult<DatabaseSchema[]> = await commandService.getDbSchema();
       if (schemaResult.success && schemaResult.data) {
-        setSchemas(Array.isArray(schemaResult.data) ? schemaResult.data : []);
+        setSchemas(schemaResult.data);
       }
 
       // Load analysis templates
-      const templatesResult = await commandFacade.analyzeTemplate();
+      const templatesResult: CommandResult<AnalysisTemplate[]> = await commandService.getAnalysisTemplates();
       if (templatesResult.success && templatesResult.data) {
-        setTemplates(Array.isArray(templatesResult.data) ? templatesResult.data : []);
+        setTemplates(templatesResult.data);
       }
 
     } catch (err) {
@@ -69,9 +71,9 @@ export function AnalyticsView() {
     setError('');
 
     try {
-      const result = await commandFacade.analyzeSql(query);
+      const result: CommandResult<any[]> = await commandService.executeSqlQuery(query);
       if (result.success && result.data) {
-        setQueryResult(Array.isArray(result.data) ? result.data : [result.data]);
+        setQueryResult(result.data);
       } else {
         setError(result.error || 'Query execution failed');
       }
@@ -82,50 +84,41 @@ export function AnalyticsView() {
     }
   };
 
-  // Global key handlers
-  useInput((input, key) => {
-    if (key.escape) {
-      if (mode === 'overview') {
-        goBack();
-      } else {
-        setMode('overview');
-        setQueryResult([]);
-      }
-    }
-    
-    if (mode === 'overview') {
-      switch (input.toLowerCase()) {
-        case '1':
-          setMode('templates');
-          break;
-        case '2':
-          setMode('sql');
-          break;
-        case '3':
-          setMode('schema');
-          break;
-        case 'r':
+  // Set up keyboard handlers
+  useViewKeyboard({
+    deps: [mode, selectedTemplate, sqlQuery, templates],
+    handlers: {
+      '1': () => {
+        if (mode === 'overview') setMode('templates');
+      },
+      '2': () => {
+        if (mode === 'overview') setMode('sql');
+      },
+      '3': () => {
+        if (mode === 'overview') setMode('schema');
+      },
+      r: () => {
+        if (mode === 'overview') {
           loadAnalyticsData();
-          break;
-      }
-    } else if (mode === 'templates') {
-      switch (input.toLowerCase()) {
-        case 'e':
-          if (selectedTemplate) {
-            const template = templates.find(t => t.id === selectedTemplate);
-            if (template) {
-              executeQuery(template.query);
-            }
+        }
+      },
+      e: () => {
+        if (mode === 'templates' && selectedTemplate) {
+          const template = templates.find(t => t.id === selectedTemplate);
+          if (template) {
+            executeQuery(template.query);
           }
-          break;
-      }
-    } else if (mode === 'sql') {
-      switch (input.toLowerCase()) {
-        case 'e':
-          if (sqlQuery.trim()) {
-            executeQuery(sqlQuery);
-          }
-          break;
+        } else if (mode === 'sql' && sqlQuery.trim()) {
+          executeQuery(sqlQuery);
+        }
+      },
+      escape: () => {
+        if (mode === 'overview') {
+          goBack();
+        } else {
+          setMode('overview');
+          setQueryResult([]);
+        }
       }
     }
   });

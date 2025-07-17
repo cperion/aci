@@ -1,34 +1,12 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Box, Text } from 'ink';
-import { useNavigation } from '../../hooks/navigation.js';
-import { useKeyboard } from '../../hooks/keyboard.js';
+import { useAuth } from '../../../hooks/use-auth.js';
 import { useTheme } from '../../themes/theme-manager.js';
 
 export function HomeView() {
-  const { navigate, state } = useNavigation();
+  const { authState } = useAuth();
+  const { portal: portalAuth } = authState;
   const { colors } = useTheme();
-  const { registerActionHandler } = useKeyboard();
-  
-  // Register action handlers for this view
-  useEffect(() => {
-    const cleanupFunctions = [
-      registerActionHandler('navigateToLogin', () => navigate('login', 'Authentication')),
-      registerActionHandler('navigateToServices', () => navigate('services', 'Service Browser')),
-      registerActionHandler('navigateToUsers', () => navigate('users', 'User Management')),
-      registerActionHandler('navigateToGroups', () => navigate('groups', 'Group Management')),
-      registerActionHandler('navigateToItems', () => navigate('items', 'Item Management')),
-      registerActionHandler('navigateToAdmin', () => navigate('admin', 'Server Administration')),
-      registerActionHandler('navigateToInsights', () => navigate('insights', 'Enterprise Insights')),
-      registerActionHandler('navigateToAnalytics', () => navigate('analytics', 'Advanced Analytics')),
-      registerActionHandler('navigateToDatastores', () => navigate('datastores', 'Datastore Management')),
-      registerActionHandler('quit', () => process.exit(0))
-    ];
-    
-    // Cleanup on unmount
-    return () => {
-      cleanupFunctions.forEach(cleanup => cleanup());
-    };
-  }, [navigate, registerActionHandler]);
   
   return (
     <Box flexDirection="column" gap={1} padding={2}>
@@ -36,30 +14,27 @@ export function HomeView() {
       <Text color={colors.metadata}>Enterprise ArcGIS Command Line Interface</Text>
       
       <Box marginTop={1} flexDirection="column">
-        <Text bold color={colors.highlights}>Quick Actions:</Text>
-        <Text color={colors.primaryText}>  <Text color={colors.portals}>l</Text> - Login / Authentication</Text>
-        <Text color={colors.primaryText}>  <Text color={colors.servers}>s</Text> - Browse Services</Text>
-        <Text color={colors.primaryText}>  <Text color={colors.users}>u</Text> - User Management</Text>
-        <Text color={colors.primaryText}>  <Text color={colors.users}>g</Text> - Group Management</Text>
-        <Text color={colors.primaryText}>  <Text color={colors.features}>i</Text> - Item Management</Text>
-        <Text color={colors.primaryText}>  <Text color={colors.warnings}>a</Text> - Server Administration</Text>
-        <Text color={colors.primaryText}>  <Text color={colors.features}>n</Text> - Enterprise Insights</Text>
-        <Text color={colors.primaryText}>  <Text color={colors.selections}>t</Text> - Advanced Analytics</Text>
-        <Text color={colors.primaryText}>  <Text color={colors.servers}>d</Text> - Datastore Management</Text>
-        <Text color={colors.primaryText}>  <Text color={colors.errors}>q</Text> - Quit</Text>
+        <Text bold color={colors.highlights}>Getting Started</Text>
+        <Text color={colors.primaryText}>• Use the <Text color={colors.highlights}>Navigation pane</Text> (left) for quick access</Text>
+        <Text color={colors.primaryText}>• All keyboard shortcuts are shown in the navigation area</Text>
+        <Text color={colors.primaryText}>• Connection status is always visible in the left pane</Text>
+        <Text color={colors.primaryText}>• Recent items appear automatically as you work</Text>
       </Box>
       
-      {/* Show current auth status */}
       <Box marginTop={1} flexDirection="column">
-        <Text bold color={colors.highlights}>Current Status:</Text>
-        <Text color={colors.primaryText}>Portal: {state.authStatus.portal ? 
-          <Text color={colors.success}>✓ Connected</Text> : 
-          <Text color={colors.warnings}>○ Not authenticated</Text>
-        }</Text>
-        <Text color={colors.primaryText}>Admin: {state.authStatus.admin ? 
-          <Text color={colors.success}>✓ Connected</Text> : 
-          <Text color={colors.warnings}>○ Not authenticated</Text>
-        }</Text>
+        <Text bold color={colors.highlights}>Next Steps</Text>
+        {!portalAuth ? (
+          <Text color={colors.warnings}>→ Press <Text color={colors.portals}>l</Text> to authenticate with your portal</Text>
+        ) : (
+          <Text color={colors.success}>→ You're connected! Try <Text color={colors.servers}>s</Text> for services or <Text color={colors.users}>u</Text> for users</Text>
+        )}
+        <Text color={colors.primaryText}>→ Press <Text color={colors.metadata}>?</Text> for detailed help anytime</Text>
+        <Text color={colors.primaryText}>→ Use <Text color={colors.metadata}>Esc</Text> to navigate back</Text>
+      </Box>
+      
+      <Box marginTop={1} flexDirection="column">
+        <Text bold color={colors.highlights}>Workflow Philosophy</Text>
+        <Text color={colors.metadata}>Left: Navigate & Access | Center: Work & Content | Right: Inspect & Act</Text>
       </Box>
     </Box>
   );

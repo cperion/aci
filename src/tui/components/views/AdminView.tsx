@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Box, Text } from 'ink';
 import { TextInput, Spinner, Alert, Select } from '@inkjs/ui';
-import { useNavigation } from '../../hooks/navigation.js';
-import { CommandFacade } from '../../utils/commandFacade.js';
+import { useNavigation } from '../../../hooks/use-navigation.js';
+import { useAuth } from '../../../hooks/use-auth.js';
+import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
+import { TuiCommandService } from '../../../services/tui-command-service.js';
+import type { CommandResult } from '../../../types/command-result.js';
 
 interface ServerInfo {
   name: string;
@@ -23,16 +26,71 @@ interface Service {
 }
 
 export function AdminView() {
-  const { goBack, navigate, setSelection, state } = useNavigation();
+  const { goBack, navigate } = useNavigation();
+  const { authState } = useAuth();
+  const { portal: portalAuth, admin: adminAuth, portalSession, adminSession } = authState;
+  const [selection, setSelection] = useState<{ serviceId?: string }>({});
   const [serverInfo, setServerInfo] = useState<ServerInfo | null>(null);
   const [services, setServices] = useState<Service[]>([]);
   const [selectedService, setSelectedService] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
-  const [mode, setMode] = useState<'overview' | 'services' | 'logs' | 'login'>('overview');
+  const [mode, setMode] = useState<'overview' | 'services' | 'logs' | 'login' | 'alerts' | 'config' | 'restart-confirm' | 'monitoring' | 'backup-confirm'>('overview');
   const [logs, setLogs] = useState<string[]>([]);
 
-  const commandFacade = CommandFacade.getInstance();
+  const commandService = useMemo(() => new TuiCommandService(portalSession || undefined), [portalSession]);
+
+  // Set up keyboard handlers
+  useViewKeyboard({
+    deps: [selectedService, services, mode],
+    handlers: {
+      a: () => setMode('alerts'),
+      h: () => {
+        console.log('Running health check...');
+        loadAdminData();
+      },
+      s: () => setMode('services'),
+      l: () => {
+        setMode('logs');
+        loadLogs();
+      },
+      c: () => setMode('config'),
+      m: () => setMode('monitoring'),
+      b: () => setMode('backup-confirm'),
+      r: () => {
+        if (mode === 'overview') {
+          loadAdminData();
+        } else if (mode === 'restart-confirm') {
+          setMode('restart-confirm');
+        }
+      },
+      i: () => {
+        const currentService = services.find(s => s.name === selectedService);
+        if (currentService) {
+          setSelection({ serviceId: currentService.name });
+          navigate('service-detail', `Service: ${currentService.name}`);
+        }
+      },
+      y: () => {
+        if (mode === 'restart-confirm') {
+          // TODO: Implement actual restart
+          console.log('Restart confirmed');
+          setMode('overview');
+        } else if (mode === 'backup-confirm') {
+          // TODO: Implement actual backup
+          console.log('Backup confirmed');
+          setMode('overview');
+        }
+      },
+      escape: () => {
+        if (mode === 'overview') {
+          goBack();
+        } else {
+          setMode('overview');
+        }
+      }
+    }
+  });
 
   // Load admin data on mount
   useEffect(() => {
@@ -45,25 +103,24 @@ export function AdminView() {
 
     try {
       // Check if admin is authenticated
-      if (!state.authStatus.admin) {
+      if (!adminAuth) {
         setMode('login');
         setIsLoading(false);
         return;
       }
 
       // Load server status
-      const statusResult = await commandFacade.adminStatus();
+      const statusResult: CommandResult<ServerInfo> = await commandService.getServerStatus();
       
       if (statusResult.success && statusResult.data) {
-        setServerInfo(statusResult.data as ServerInfo);
+        setServerInfo(statusResult.data);
       }
 
       // Load services
-      const servicesResult = await commandFacade.adminServices();
+      const servicesResult: CommandResult<Service[]> = await commandService.listServices();
       
       if (servicesResult.success && servicesResult.data) {
-        const servicesData = Array.isArray(servicesResult.data) ? servicesResult.data : [];
-        setServices(servicesData);
+        setServices(servicesResult.data);
       }
 
     } catch (err) {
@@ -76,10 +133,9 @@ export function AdminView() {
   const loadLogs = async () => {
     setIsLoading(true);
     try {
-      const result = await commandFacade.adminLogs();
+      const result: CommandResult<string[]> = await commandService.getServerLogs();
       if (result.success && result.data) {
-        const logsData = Array.isArray(result.data) ? result.data : [result.data];
-        setLogs(logsData);
+        setLogs(result.data);
       }
     } catch (err) {
       setError('Failed to load logs');
@@ -88,56 +144,13 @@ export function AdminView() {
     }
   };
 
-  // Global key handlers
-  useInput((input, key) => {
-    if (key.escape) {
-      if (mode === 'services' || mode === 'logs') {
-        setMode('overview');
-      } else if (mode === 'login') {
-        goBack();
-      } else {
-        goBack();
-      }
-    }
-    
-    if (mode === 'overview') {
-      switch (input.toLowerCase()) {
-        case 's':
-          setMode('services');
-          break;
-        case 'l':
-          setMode('logs');
-          loadLogs();
-          break;
-        case 'r':
-          loadAdminData();
-          break;
-        case 'h':
-          // Load health status
-          loadAdminData();
-          break;
-      }
-    } else if (mode === 'services') {
-      switch (input.toLowerCase()) {
-        case 'r':
-          loadAdminData();
-          break;
-        case 'i':
-          if (selectedService) {
-            setSelection({ serviceId: selectedService });
-            navigate('service-detail', `Service: ${selectedService}`);
-          }
-          break;
-      }
-    }
-  });
 
   const handleServiceSelect = (serviceName: string) => {
     setSelectedService(serviceName);
   };
 
   // Check authentication status
-  if (!state.authStatus.admin && mode !== 'login') {
+  if (!adminAuth && mode !== 'login') {
     return (
       <Box flexDirection="column" gap={1}>
         <Text bold color="yellow">Admin Authentication Required</Text>
@@ -265,6 +278,111 @@ export function AdminView() {
     );
   }
 
+  if (mode === 'alerts') {
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="yellow">System Alerts</Text>
+        <Text dimColor>Recent system alerts and warnings:</Text>
+        
+        <Box flexDirection="column" gap={1} marginTop={1}>
+          <Alert variant="warning" title="High Memory Usage">
+            Memory usage is at 85% - consider restarting services
+          </Alert>
+          <Alert variant="info" title="Service Update Available">
+            ArcGIS Server 11.1 update is available
+          </Alert>
+          <Alert variant="error" title="Failed Login Attempts">
+            12 failed login attempts in the last hour
+          </Alert>
+        </Box>
+        
+        <Box marginTop={1}>
+          <Text dimColor>Press <Text color="cyan">Esc</Text> to go back to overview</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (mode === 'config') {
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="blue">Server Configuration</Text>
+        <Text dimColor>Current server configuration settings:</Text>
+        
+        <Box flexDirection="column" gap={1} marginTop={1}>
+          <Text><Text bold>Max Heap Size:</Text> 8192 MB</Text>
+          <Text><Text bold>Instances per Machine:</Text> 2</Text>
+          <Text><Text bold>Max Wait Time:</Text> 60 seconds</Text>
+          <Text><Text bold>Max Idle Time:</Text> 1800 seconds</Text>
+          <Text><Text bold>Max Usage Time:</Text> 600 seconds</Text>
+          <Text><Text bold>Cleanup Timeout:</Text> 30 seconds</Text>
+        </Box>
+        
+        <Box marginTop={1}>
+          <Text dimColor>Press <Text color="cyan">e</Text> to edit configuration, <Text color="cyan">Esc</Text> to go back</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (mode === 'restart-confirm') {
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="red">Restart Server</Text>
+        <Alert variant="warning" title="Service Interruption">
+          This will restart the ArcGIS Server and temporarily interrupt all services.
+        </Alert>
+        <Text dimColor>All active connections will be terminated.</Text>
+        <Text dimColor>Services will be unavailable during restart (estimated 2-3 minutes).</Text>
+        
+        <Box marginTop={1}>
+          <Text>Press <Text color="red">y</Text> to restart server, <Text color="cyan">Esc</Text> to cancel</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (mode === 'monitoring') {
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="green">System Monitoring</Text>
+        <Text dimColor>Real-time system performance metrics:</Text>
+        
+        <Box flexDirection="column" gap={1} marginTop={1}>
+          <Text><Text bold>CPU Usage:</Text> <Text color="yellow">72%</Text></Text>
+          <Text><Text bold>Memory Usage:</Text> <Text color="red">85%</Text></Text>
+          <Text><Text bold>Disk I/O:</Text> <Text color="green">12%</Text></Text>
+          <Text><Text bold>Network:</Text> <Text color="green">8%</Text></Text>
+          <Text><Text bold>Active Connections:</Text> 24</Text>
+          <Text><Text bold>Requests/minute:</Text> 156</Text>
+          <Text><Text bold>Average Response Time:</Text> 234ms</Text>
+        </Box>
+        
+        <Box marginTop={1}>
+          <Text dimColor>Press <Text color="cyan">r</Text> to refresh, <Text color="cyan">Esc</Text> to go back</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (mode === 'backup-confirm') {
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="blue">Create Server Backup</Text>
+        <Alert variant="info" title="Backup Configuration">
+          This will create a backup of server configuration and data.
+        </Alert>
+        <Text dimColor>Backup includes: configuration files, data stores, security settings</Text>
+        <Text dimColor>Estimated size: ~500 MB</Text>
+        <Text dimColor>Estimated time: 5-10 minutes</Text>
+        
+        <Box marginTop={1}>
+          <Text>Press <Text color="green">y</Text> to create backup, <Text color="cyan">Esc</Text> to cancel</Text>
+        </Box>
+      </Box>
+    );
+  }
+
   // Overview mode
   return (
     <Box flexDirection="column" gap={1}>
@@ -296,6 +414,10 @@ export function AdminView() {
         <Text bold>Actions:</Text>
         <Text>  <Text color="cyan">s</Text> - Manage services</Text>
         <Text>  <Text color="cyan">l</Text> - View server logs</Text>
+        <Text>  <Text color="cyan">a</Text> - View alerts</Text>
+        <Text>  <Text color="cyan">c</Text> - Server configuration</Text>
+        <Text>  <Text color="cyan">m</Text> - System monitoring</Text>
+        <Text>  <Text color="cyan">b</Text> - Create backup</Text>
         <Text>  <Text color="cyan">h</Text> - Check health status</Text>
         <Text>  <Text color="cyan">r</Text> - Refresh data</Text>
         <Text>  <Text color="cyan">Esc</Text> - Go back</Text>

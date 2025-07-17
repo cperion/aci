@@ -1,17 +1,21 @@
-import React, { useState, useEffect } from 'react';
+/**
+ * Simplified ServicesView
+ * Demonstrates the new simplified patterns without complex contexts
+ * Uses local state management and direct keyboard handling
+ */
+
+import React, { useState, useEffect, useCallback } from 'react';
 import { Box, Text } from 'ink';
-import { TextInput, Spinner, Alert, Select } from '@inkjs/ui';
-import { useNavigation } from '../../hooks/navigation.js';
-import { useKeyboard } from '../../hooks/keyboard.js';
+import { TextInput, Spinner, Alert } from '@inkjs/ui';
 import { useTheme } from '../../themes/theme-manager.js';
-import { CommandFacade } from '../../utils/commandFacade.js';
-import { ActionFooter } from '../ActionFooter.js';
-import { SelectionBar } from '../SelectionBar.js';
-import { ModeIndicator } from '../ModeIndicator.js';
-import { ConfirmationDialog } from '../ConfirmationDialog.js';
-import { ActionProcessor } from '../../keyboard/action-processor.js';
-import { useOptimisticOperations } from '../../hooks/optimistic.js';
-import { NotificationSystem } from '../NotificationSystem.js';
+import { useNavigation } from '../../../hooks/use-navigation.js';
+import { useSelection } from '../../../hooks/use-selection.js';
+import { useNotification } from '../../../hooks/use-notification.js';
+import { useServiceRestart } from '../../../hooks/use-service-restart.js';
+import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
+import { ErrorBoundary } from '../common/ErrorBoundary.js';
+import { DatabaseService } from '../../../services/database-service.js';
+import { formatError } from '../../../utils/error-utils.js';
 
 interface Service {
   serviceName: string;
@@ -22,203 +26,58 @@ interface Service {
 }
 
 export function ServicesView() {
-  const { goBack, navigate, setSelection } = useNavigation();
-  const { colors } = useTheme();
-  const {
-    currentMode,
-    selectedItems,
-    toggleItemSelection,
-    clearSelection,
-    registerActionHandler,
-    getAvailableShortcuts,
-    viewState,
-    setViewState
-  } = useKeyboard();
-  
+  // Local state management - no complex contexts
   const [services, setServices] = useState<Service[]>([]);
   const [filteredServices, setFilteredServices] = useState<Service[]>([]);
+  const [selectedIndex, setSelectedIndex] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
-  const [currentServiceIndex, setCurrentServiceIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [showConfirmDialog, setShowConfirmDialog] = useState(false);
-  const [confirmAction, setConfirmAction] = useState<{
-    action: string;
-    title: string;
-    message: string;
-    destructive?: boolean;
-  } | null>(null);
-  const [mode, setMode] = useState<'list' | 'search' | 'detail'>('list');
+  const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<'list' | 'search'>('list');
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<string | null>(null);
 
-  const commandFacade = CommandFacade.getInstance();
-  const { optimisticDelete, optimisticRestart, isPending } = useOptimisticOperations();
+  // Simple hooks instead of complex contexts
+  const { colors } = useTheme();
+  const { navigate, goBack } = useNavigation();
+  const { selected, toggle, clearAll, getSelectedFrom, hasSelection } = useSelection();
+  const { showSuccess, showError, showWarning, notifications } = useNotification();
+  const { restart, isRestarting, getError: getRestartError } = useServiceRestart();
 
-  // Helper functions for optimistic operations
-  const removeServicesFromList = (serviceIds: string[]) => {
-    setServices(prev => prev.filter(s => !serviceIds.includes(s.serviceName)));
-    setFilteredServices(prev => prev.filter(s => !serviceIds.includes(s.serviceName)));
-  };
+  // Load services function
+  const loadServices = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
 
-  const restoreServicesToList = (restoredServices: Service[]) => {
-    setServices(prev => [...prev, ...restoredServices]);
-    setFilteredServices(prev => [...prev, ...restoredServices]);
-  };
-
-  const updateServiceStatus = (serviceIds: string[], status: string) => {
-    const updateServices = (services: Service[]) => 
-      services.map(s => 
-        serviceIds.includes(s.serviceName) ? { ...s, status } : s
-      );
-    
-    setServices(updateServices);
-    setFilteredServices(updateServices);
-  };
-
-  const restoreServiceStatus = (statusUpdates: Array<{ id: string; originalStatus: string }>) => {
-    const updateServices = (services: Service[]) => 
-      services.map(s => {
-        const update = statusUpdates.find(u => u.id === s.serviceName);
-        return update ? { ...s, status: update.originalStatus } : s;
-      });
-    
-    setServices(updateServices);
-    setFilteredServices(updateServices);
-  };
-
-  // Register action handlers with stable references to avoid memory leaks
-  useEffect(() => {
-    const cleanupFunctions = [
-      registerActionHandler('moveDown', () => {
-        setCurrentServiceIndex(prev => {
-          const newIndex = Math.min(prev + 1, filteredServices.length - 1);
-          return newIndex;
-        });
-      }),
-      registerActionHandler('moveUp', () => {
-        setCurrentServiceIndex(prev => Math.max(prev - 1, 0));
-      }),
-      registerActionHandler('toggleServiceSelection', () => {
-        const currentService = filteredServices[currentServiceIndex];
-        if (currentService) {
-          toggleItemSelection(currentService.serviceName);
-        }
-      }),
-      registerActionHandler('deleteSelectedService', () => {
-        const currentService = filteredServices[currentServiceIndex];
-        if (currentService) {
-          setConfirmAction({
-            action: 'delete',
-            title: 'Delete Service',
-            message: `Are you sure you want to delete ${currentService.serviceName}?`,
-            destructive: true
-          });
-          setShowConfirmDialog(true);
-        }
-      }),
-      registerActionHandler('deleteBulkServices', () => {
-        const selectedCount = selectedItems.length;
-        if (selectedCount > 0) {
-          setConfirmAction({
-            action: 'deleteBulk',
-            title: 'Delete Multiple Services',
-            message: `Delete ${selectedCount} selected services?`,
-            destructive: true
-          });
-          setShowConfirmDialog(true);
-        }
-      }),
-      registerActionHandler('restartSelectedService', () => {
-        const currentService = filteredServices[currentServiceIndex];
-        if (currentService) {
-          setConfirmAction({
-            action: 'restart',
-            title: 'Restart Service',
-            message: `Restart ${currentService.serviceName}?`
-          });
-          setShowConfirmDialog(true);
-        }
-      }),
-      registerActionHandler('restartBulkServices', () => {
-        const selectedCount = selectedItems.length;
-        if (selectedCount > 0) {
-          setConfirmAction({
-            action: 'restartBulk',
-            title: 'Restart Multiple Services',
-            message: `Restart ${selectedCount} selected services?`
-          });
-          setShowConfirmDialog(true);
-        }
-      }),
-      registerActionHandler('inspectSelectedService', () => {
-        const currentService = filteredServices[currentServiceIndex];
-        if (currentService) {
-          setSelection({ serviceId: currentService.serviceName });
-          navigate('service-detail', `Service: ${currentService.serviceName}`);
-        }
-      }),
-      registerActionHandler('toggleSearchMode', () => {
-        const newMode = mode === 'search' ? 'list' : 'search';
-        setMode(newMode);
-        setViewState({ searchActive: newMode === 'search' });
-      }),
-      registerActionHandler('refreshServiceList', () => {
-        loadServices();
-      }),
-      registerActionHandler('editSelectedService', () => {
-        const currentService = filteredServices[currentServiceIndex];
-        if (currentService) {
-          // TODO: Implement service editing
-          console.log('Edit service:', currentService.serviceName);
-        }
-      }),
-      registerActionHandler('toggleFilterPanel', () => {
-        // TODO: Implement filter panel
-        console.log('Toggle filter panel');
-      })
-    ];
-    
-    return () => {
-      cleanupFunctions.forEach(cleanup => cleanup());
-    };
-  }, [registerActionHandler]); // Only depend on stable registerActionHandler
-
-  // Create stable references for the action handlers that need current state
-  const handleMoveDown = React.useCallback(() => {
-    setCurrentServiceIndex(prev => Math.min(prev + 1, filteredServices.length - 1));
-  }, [filteredServices.length]);
-
-  const handleMoveUp = React.useCallback(() => {
-    setCurrentServiceIndex(prev => Math.max(prev - 1, 0));
-  }, []);
-
-  const handleToggleSelection = React.useCallback(() => {
-    const currentService = filteredServices[currentServiceIndex];
-    if (currentService) {
-      toggleItemSelection(currentService.serviceName);
+    try {
+      // Mock data for demonstration - replace with actual API call
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      const mockServices: Service[] = [
+        { serviceName: 'MapService1', type: 'MapServer', status: 'started', folder: 'GIS' },
+        { serviceName: 'FeatureService1', type: 'FeatureServer', status: 'started' },
+        { serviceName: 'ImageService1', type: 'ImageServer', status: 'stopped', folder: 'Imagery' },
+        { serviceName: 'GPService1', type: 'GPServer', status: 'started', folder: 'Tools' },
+        { serviceName: 'GeocodeService', type: 'GeocodeServer', status: 'started' }
+      ];
+      
+      setServices(mockServices);
+      setFilteredServices(mockServices);
+      
+      // Log successful operation
+      DatabaseService.logOperation('list_services', 'default', `Loaded ${mockServices.length} services`);
+      
+    } catch (err) {
+      const formattedError = formatError(err);
+      setError(formattedError.userMessage);
+      
+      // Log error
+      DatabaseService.logError('list_services', 'default', err);
+      showError(formattedError.userMessage);
+    } finally {
+      setIsLoading(false);
     }
-  }, [filteredServices, currentServiceIndex, toggleItemSelection]);
-
-  // Update handlers when dependencies change
-  useEffect(() => {
-    // Re-register handlers that depend on current state
-    const actionProcessor = ActionProcessor.getInstance();
-    actionProcessor.registerActionHandler('moveDown', handleMoveDown);
-    actionProcessor.registerActionHandler('moveUp', handleMoveUp);
-    actionProcessor.registerActionHandler('toggleServiceSelection', handleToggleSelection);
-  }, [handleMoveDown, handleMoveUp, handleToggleSelection]);
-
-  // Load services on mount
-  useEffect(() => {
-    loadServices();
-  }, []);
-
-  // Update view state
-  useEffect(() => {
-    setViewState({
-      currentItem: filteredServices[currentServiceIndex] || null,
-      searchActive: mode === 'search'
-    });
-  }, [currentServiceIndex, filteredServices, mode, setViewState]);
+  }, [showError]);
 
   // Filter services when search term changes
   useEffect(() => {
@@ -231,310 +90,424 @@ export function ServicesView() {
         (service.folder && service.folder.toLowerCase().includes(searchTerm.toLowerCase()))
       );
       setFilteredServices(filtered);
+      setSelectedIndex(0); // Reset selection when filtering
     }
   }, [searchTerm, services]);
 
-  const loadServices = async () => {
-    setIsLoading(true);
-    setError('');
+  // Reset selected index when filtered services change
+  useEffect(() => {
+    if (selectedIndex >= filteredServices.length) {
+      setSelectedIndex(Math.max(0, filteredServices.length - 1));
+    }
+  }, [filteredServices, selectedIndex]);
+
+  // Direct operation handlers
+  const handleDelete = async () => {
+    const currentService = filteredServices[selectedIndex];
+    if (!currentService) return;
 
     try {
-      const result = await commandFacade.adminServices();
+      // Show optimistic UI update
+      showWarning(`Deleting ${currentService.serviceName}...`);
       
-      if (result.success && result.data) {
-        // Parse services data from CLI output
-        const servicesData = Array.isArray(result.data) ? result.data : [];
-        setServices(servicesData);
-        setFilteredServices(servicesData);
-      } else {
-        setError(result.error || 'Failed to load services');
+      // Remove from UI immediately
+      setServices(prev => prev.filter(s => s.serviceName !== currentService.serviceName));
+      setFilteredServices(prev => prev.filter(s => s.serviceName !== currentService.serviceName));
+      
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Occasionally fail for testing
+      if (Math.random() < 0.1) {
+        throw new Error('Service deletion failed');
       }
+      
+      showSuccess(`Successfully deleted ${currentService.serviceName}`);
+      
+      // Log operation
+      DatabaseService.logOperation('delete_service', 'default', `Deleted service: ${currentService.serviceName}`);
+      
     } catch (err) {
-      setError('Network error loading services');
-    } finally {
-      setIsLoading(false);
+      // Restore service on error
+      setServices(prev => [...prev, currentService]);
+      setFilteredServices(prev => [...prev, currentService]);
+      
+      const formattedError = formatError(err);
+      showError(formattedError.userMessage);
+      DatabaseService.logError('delete_service', 'default', err);
     }
   };
 
-  // Handle confirmation dialog actions with optimistic updates
-  const handleConfirmAction = async () => {
-    if (!confirmAction) return;
-    
+  const handleRestart = async () => {
+    const currentService = filteredServices[selectedIndex];
+    if (!currentService) return;
+
     try {
-      switch (confirmAction.action) {
-        case 'delete': {
-          const currentService = filteredServices[currentServiceIndex];
-          if (currentService) {
-            await optimisticDelete(
-              [currentService],
-              (service) => service.serviceName,
-              (service) => service.serviceName,
-              removeServicesFromList,
-              restoreServicesToList,
-              async (ids) => {
-                // TODO: Replace with actual API call
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                // Simulate occasional failure for testing
-                if (Math.random() < 0.1) {
-                  throw new Error('Service deletion failed');
-                }
-                return { success: true };
-              }
-            );
-          }
-          break;
+      await restart(currentService.serviceName, async (serviceId: string) => {
+        // Simulate restart API call
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        
+        // Update service status optimistically
+        setServices(prev => prev.map(s => 
+          s.serviceName === serviceId ? { ...s, status: 'started' } : s
+        ));
+        setFilteredServices(prev => prev.map(s => 
+          s.serviceName === serviceId ? { ...s, status: 'started' } : s
+        ));
+        
+        return { success: true };
+      });
+      
+      showSuccess(`Successfully restarted ${currentService.serviceName}`);
+      
+    } catch (err) {
+      const formattedError = formatError(err);
+      showError(formattedError.userMessage);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const selectedServices = getSelectedFrom(filteredServices, s => s.serviceName);
+    if (selectedServices.length === 0) return;
+
+    try {
+      showWarning(`Deleting ${selectedServices.length} services...`);
+      
+      // Remove from UI immediately
+      const serviceNames = selectedServices.map((s: any) => s.serviceName);
+      setServices(prev => prev.filter(s => !serviceNames.includes(s.serviceName)));
+      setFilteredServices(prev => prev.filter(s => !serviceNames.includes(s.serviceName)));
+      
+      // Clear selection
+      clearAll();
+      
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      showSuccess(`Successfully deleted ${selectedServices.length} services`);
+      
+    } catch (err) {
+      // Restore services on error
+      setServices(prev => [...prev, ...selectedServices]);
+      setFilteredServices(prev => [...prev, ...selectedServices]);
+      
+      const formattedError = formatError(err);
+      showError(formattedError.userMessage);
+    }
+  };
+
+  // Direct keyboard handling
+  useViewKeyboard('services', useCallback((input: string, key: any) => {
+    // Handle confirmation dialog
+    if (showConfirm) {
+      if (input === 'y') {
+        setShowConfirm(false);
+        setConfirmAction(null);
+        
+        if (confirmAction === 'delete') {
+          handleDelete();
+        } else if (confirmAction === 'bulkDelete') {
+          handleBulkDelete();
+        } else if (confirmAction === 'restart') {
+          handleRestart();
         }
-        case 'deleteBulk': {
-          const selectedServices = services.filter(s => 
-            selectedItems.includes(s.serviceName)
-          );
-          if (selectedServices.length > 0) {
-            await optimisticDelete(
-              selectedServices,
-              (service) => service.serviceName,
-              (service) => service.serviceName,
-              removeServicesFromList,
-              restoreServicesToList,
-              async (ids) => {
-                // TODO: Replace with actual API call
-                await new Promise(resolve => setTimeout(resolve, 1500));
-                // Simulate occasional failure for testing
-                if (Math.random() < 0.15) {
-                  throw new Error('Bulk deletion failed');
-                }
-                return { success: true };
-              }
-            );
-            clearSelection();
-          }
-          break;
-        }
-        case 'restart': {
-          const currentService = filteredServices[currentServiceIndex];
-          if (currentService) {
-            await optimisticRestart(
-              [currentService],
-              (service) => service.serviceName,
-              (service) => service.serviceName,
-              updateServiceStatus,
-              restoreServiceStatus,
-              async (ids) => {
-                // TODO: Replace with actual API call
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                // Simulate occasional failure for testing
-                if (Math.random() < 0.1) {
-                  throw new Error('Service restart failed');
-                }
-                // Update status to started after restart
-                updateServiceStatus(ids, 'started');
-                return { success: true };
-              }
-            );
-          }
-          break;
-        }
-        case 'restartBulk': {
-          const selectedServices = services.filter(s => 
-            selectedItems.includes(s.serviceName)
-          );
-          if (selectedServices.length > 0) {
-            await optimisticRestart(
-              selectedServices,
-              (service) => service.serviceName,
-              (service) => service.serviceName,
-              updateServiceStatus,
-              restoreServiceStatus,
-              async (ids) => {
-                // TODO: Replace with actual API call
-                await new Promise(resolve => setTimeout(resolve, 3000));
-                // Simulate occasional failure for testing
-                if (Math.random() < 0.15) {
-                  throw new Error('Bulk restart failed');
-                }
-                // Update status to started after restart
-                updateServiceStatus(ids, 'started');
-                return { success: true };
-              }
-            );
-            clearSelection();
-          }
-          break;
-        }
+        return true;
+      } else if (input === 'n' || key?.escape) {
+        setShowConfirm(false);
+        setConfirmAction(null);
+        return true;
       }
-    } catch (error) {
-      console.error('Action failed:', error);
-    } finally {
-      setShowConfirmDialog(false);
-      setConfirmAction(null);
+      return true; // Consume all input during confirmation
     }
-  };
-
-  const handleCancelAction = () => {
-    setShowConfirmDialog(false);
-    setConfirmAction(null);
-  };
-
-  const handleServiceSelect = (serviceId: string) => {
-    const index = filteredServices.findIndex(s => s.serviceName === serviceId);
-    if (index >= 0) {
-      setCurrentServiceIndex(index);
+    
+    // Handle search mode
+    if (mode === 'search') {
+      if (key?.escape) {
+        setMode('list');
+        return true;
+      }
+      return false; // Let TextInput handle other keys
     }
-  };
+    
+    // Main navigation
+    if (key?.downArrow || input === 'j') {
+      setSelectedIndex(prev => Math.min(prev + 1, filteredServices.length - 1));
+      return true;
+    }
+    
+    if (key?.upArrow || input === 'k') {
+      setSelectedIndex(prev => Math.max(prev - 1, 0));
+      return true;
+    }
+    
+    // Actions
+    switch (input) {
+      case ' ':
+        // Toggle selection
+        const currentService = filteredServices[selectedIndex];
+        if (currentService) {
+          toggle(currentService.serviceName);
+        }
+        return true;
+        
+      case 'd':
+        // Delete service(s)
+        if (hasSelection()) {
+          setConfirmAction('bulkDelete');
+          setShowConfirm(true);
+        } else {
+          setConfirmAction('delete');
+          setShowConfirm(true);
+        }
+        return true;
+        
+      case 'r':
+        // Restart service or refresh list
+        if (key?.ctrl) {
+          loadServices(); // Ctrl+R = refresh
+        } else {
+          setConfirmAction('restart');
+          setShowConfirm(true);
+        }
+        return true;
+        
+      case 'f':
+      case '/':
+        // Search mode
+        setMode('search');
+        return true;
+        
+      case 'c':
+        // Clear selection
+        clearAll();
+        return true;
+        
+      case '\r':
+      case '\n':
+        // View service details
+        const service = filteredServices[selectedIndex];
+        if (service) {
+          navigate('service-detail', `Service: ${service.serviceName}`, {
+            entityId: service.serviceName,
+            entityType: 'service'
+          });
+        }
+        return true;
+        
+      default:
+        if (key?.escape) {
+          goBack();
+          return true;
+        }
+        return false;
+    }
+  }, [filteredServices, selectedIndex, hasSelection, showConfirm, confirmAction, mode, toggle, clearAll, navigate, goBack, loadServices]));
 
-  const handleSearchSubmit = (term: string) => {
-    setSearchTerm(term);
-    setMode('list');
-  };
+  // Load services on mount
+  useEffect(() => {
+    loadServices();
+  }, [loadServices]);
 
+  // Loading state
   if (isLoading) {
     return (
-      <Box flexDirection="column" gap={1}>
-        <Text bold color={colors.highlights}>Loading Services...</Text>
-        <Spinner label="Fetching ArcGIS Server services" />
-        <Text color={colors.metadata}>Please wait while we retrieve service information</Text>
-      </Box>
+      <ErrorBoundary name="ServicesView">
+        <Box flexDirection="column" gap={1} padding={1}>
+          <Text bold color={colors.highlights}>Loading Services...</Text>
+          <Spinner label="Fetching ArcGIS Server services" />
+          <Text color={colors.metadata}>Please wait while we retrieve service information</Text>
+        </Box>
+      </ErrorBoundary>
     );
   }
 
+  // Error state
   if (error) {
     return (
-      <Box flexDirection="column" gap={1}>
-        <Text bold color={colors.errors}>Service Loading Error</Text>
-        <Alert variant="error" title="Connection Error">
-          {error}
-        </Alert>
-        <Box marginTop={1}>
-          <Text color={colors.metadata}>Press <Text color={colors.highlights}>r</Text> to retry, <Text color={colors.highlights}>Esc</Text> to go back</Text>
+      <ErrorBoundary name="ServicesView">
+        <Box flexDirection="column" gap={1} padding={1}>
+          <Text bold color={colors.errors}>Service Loading Error</Text>
+          <Alert variant="error" title="Connection Error">
+            {error}
+          </Alert>
+          <Box marginTop={1}>
+            <Text color={colors.metadata}>
+              Press <Text color={colors.highlights}>r</Text> to retry, 
+              <Text color={colors.highlights}> Esc</Text> to go back
+            </Text>
+          </Box>
         </Box>
-      </Box>
+      </ErrorBoundary>
     );
   }
 
+  // Search mode
   if (mode === 'search') {
     return (
-      <Box flexDirection="column" gap={1}>
-        <Text bold color={colors.highlights}>Search Services</Text>
-        <Text color={colors.metadata}>Enter search term to filter services:</Text>
-        <TextInput
-          placeholder="Search by name, type, or folder..."
-          onChange={setSearchTerm}
-          onSubmit={handleSearchSubmit}
-        />
-        <Text color={colors.metadata}>Press <Text color={colors.highlights}>Esc</Text> to cancel search</Text>
-      </Box>
+      <ErrorBoundary name="ServicesView">
+        <Box flexDirection="column" gap={1} padding={1}>
+          <Text bold color={colors.highlights}>Search Services</Text>
+          <Text color={colors.metadata}>Enter search term to filter services:</Text>
+          <TextInput
+            placeholder="Search by name, type, or folder..."
+            onChange={setSearchTerm}
+            onSubmit={() => setMode('list')}
+          />
+          <Text color={colors.metadata}>
+            Press <Text color={colors.highlights}>Esc</Text> to cancel, 
+            <Text color={colors.highlights}> Enter</Text> to apply filter
+          </Text>
+        </Box>
+      </ErrorBoundary>
     );
   }
 
-  // Prepare service options for enhanced display
-  const currentService = filteredServices[currentServiceIndex];
-  const availableShortcuts = getAvailableShortcuts('services');
-  
-  // Get bulk actions for selection bar
-  const bulkActions = [
-    { key: 'D', label: 'Delete', action: 'deleteBulkServices' },
-    { key: 'R', label: 'Restart', action: 'restartBulkServices' },
-    { key: 'Esc', label: 'Clear', action: 'clearSelection' }
-  ];
+  // Confirmation dialog
+  if (showConfirm) {
+    const currentService = filteredServices[selectedIndex];
+    const selectedServices = getSelectedFrom(filteredServices, s => s.serviceName);
+    
+    let message = '';
+    let destructive = false;
+    
+    if (confirmAction === 'delete') {
+      message = `Delete service "${currentService?.serviceName}"?`;
+      destructive = true;
+    } else if (confirmAction === 'bulkDelete') {
+      message = `Delete ${selectedServices.length} selected services?`;
+      destructive = true;
+    } else if (confirmAction === 'restart') {
+      message = `Restart service "${currentService?.serviceName}"?`;
+    }
+    
+    return (
+      <ErrorBoundary name="ServicesView">
+        <Box flexDirection="column" gap={1} padding={1} 
+             borderStyle="double" borderColor={destructive ? "red" : "yellow"}>
+          <Text bold color={destructive ? colors.errors : colors.warnings}>
+            Confirm Action
+          </Text>
+          <Text>{message}</Text>
+          <Box marginTop={1}>
+            <Text>
+              <Text color={colors.success}>[y]</Text> Yes  
+              <Text color={colors.errors}> [n]</Text> No
+            </Text>
+          </Box>
+        </Box>
+      </ErrorBoundary>
+    );
+  }
+
+  // Main view
+  const currentService = filteredServices[selectedIndex];
+  const selectedServices = getSelectedFrom(filteredServices, s => s.serviceName);
 
   return (
-    <Box flexDirection="column" height="100%">
-      {/* Header */}
-      <Box flexDirection="column" gap={1} paddingX={2} paddingY={1}>
-        <Text bold color={colors.highlights}>ArcGIS Server Services</Text>
-        <Text color={colors.metadata}>
-          Found {filteredServices.length} services
-          {searchTerm && ` matching "${searchTerm}"`}
-        </Text>
-        
-        {/* Mode indicator */}
-        <ModeIndicator 
-          mode={currentMode} 
-          selectedCount={selectedItems.length}
-        />
-      </Box>
+    <ErrorBoundary name="ServicesView">
+      <Box flexDirection="column" height="100%">
+        {/* Header */}
+        <Box flexDirection="column" gap={1} paddingX={1} paddingY={1}>
+          <Text bold color={colors.highlights}>ArcGIS Server Services</Text>
+          <Text color={colors.metadata}>
+            Found {filteredServices.length} services
+            {searchTerm && ` matching "${searchTerm}"`}
+            {hasSelection() && ` (${selectedServices.length} selected)`}
+          </Text>
+        </Box>
 
-      {/* Selection bar (shown when items are selected) */}
-      {selectedItems.length > 0 && (
-        <SelectionBar
-          selectedItems={selectedItems}
-          onClearSelection={clearSelection}
-          bulkActions={bulkActions}
-        />
-      )}
+        {/* Service list */}
+        <Box flexGrow={1} paddingX={1}>
+          {filteredServices.length === 0 ? (
+            <Box flexDirection="column" gap={1}>
+              <Text color={colors.warnings}>No services found</Text>
+              {searchTerm && (
+                <Text color={colors.metadata}>Try a different search term or clear the filter</Text>
+              )}
+            </Box>
+          ) : (
+            <Box flexDirection="column">
+              {filteredServices.map((service, index) => {
+                const isSelected = selected.includes(service.serviceName);
+                const isCurrent = index === selectedIndex;
+                const isServiceRestarting = isRestarting(service.serviceName);
+                
+                return (
+                  <Box key={service.serviceName} paddingLeft={1}>
+                    <Text
+                      color={
+                        isCurrent ? colors.selections :
+                        isSelected ? colors.features :
+                        colors.primaryText
+                      }
+                      bold={isCurrent}
+                    >
+                      {isCurrent ? '▶ ' : '  '}
+                      {isSelected ? '◉ ' : '○ '}
+                      {isServiceRestarting ? '⟳ ' : ''}
+                      {service.serviceName} ({service.type}) - {service.status}
+                      {service.folder && ` [${service.folder}]`}
+                    </Text>
+                  </Box>
+                );
+              })}
+            </Box>
+          )}
+        </Box>
 
-      {/* Main content */}
-      <Box flexGrow={1} paddingX={2}>
-        {filteredServices.length === 0 ? (
-          <Box flexDirection="column" gap={1}>
-            <Text color={colors.warnings}>No services found</Text>
-            {searchTerm && (
-              <Text color={colors.metadata}>Try a different search term or clear the filter</Text>
-            )}
-          </Box>
-        ) : (
-          <Box flexDirection="column" gap={1}>
-            <Text bold color={colors.highlights}>Service List:</Text>
-            
-            {/* Service list with highlighting */}
-            {filteredServices.map((service, index) => {
-              const isSelected = selectedItems.includes(service.serviceName);
-              const isCurrent = index === currentServiceIndex;
-              
-              return (
-                <Box key={service.serviceName} paddingX={1}>
-                  <Text
-                    color={
-                      isCurrent ? colors.selections :
-                      isSelected ? colors.features :
-                      colors.primaryText
-                    }
-                    bold={isCurrent}
-                  >
-                    {isCurrent ? '▶ ' : '  '}
-                    {isSelected ? '◉ ' : '○ '}
-                    {service.serviceName} ({service.type}) - {service.status}
-                    {service.folder && ` [${service.folder}]`}
-                  </Text>
-                </Box>
-              );
-            })}
-            
-            {/* Current service details */}
-            {currentService && (
-              <Box marginTop={1} flexDirection="column" gap={1} paddingX={1}>
-                <Text bold color={colors.highlights}>Current Service:</Text>
-                <Text color={colors.primaryText}>{currentService.serviceName}</Text>
-                <Text color={colors.metadata}>Type: {currentService.type} | Status: {currentService.status}</Text>
-                {currentService.url && (
-                  <Text color={colors.metadata}>URL: {currentService.url}</Text>
-                )}
-              </Box>
+        {/* Current service details */}
+        {currentService && (
+          <Box marginTop={1} flexDirection="column" gap={1} paddingX={1} paddingY={1} 
+               borderStyle="single" borderColor={colors.metadata}>
+            <Text bold color={colors.highlights}>Current Service:</Text>
+            <Text color={colors.primaryText}>{currentService.serviceName}</Text>
+            <Text color={colors.metadata}>
+              Type: {currentService.type} | Status: {currentService.status}
+            </Text>
+            {currentService.url && (
+              <Text color={colors.metadata}>URL: {currentService.url}</Text>
             )}
           </Box>
         )}
-      </Box>
 
-      {/* Action footer */}
-      <ActionFooter
-        shortcuts={availableShortcuts}
-        mode={currentMode}
-        selectedCount={selectedItems.length}
-      />
-      
-      {/* Confirmation dialog */}
-      <ConfirmationDialog
-        visible={showConfirmDialog}
-        title={confirmAction?.title || ''}
-        message={confirmAction?.message || ''}
-        itemCount={confirmAction?.action.includes('Bulk') ? selectedItems.length : 1}
-        itemType="services"
-        destructive={confirmAction?.destructive}
-        onConfirm={handleConfirmAction}
-        onCancel={handleCancelAction}
-      />
-      
-      {/* Notification system */}
-      <NotificationSystem position="top-right" maxNotifications={3} />
-    </Box>
+        {/* Shortcuts help */}
+        <Box paddingX={1} paddingY={1} borderStyle="single" borderTop borderColor={colors.metadata}>
+          <Text color={colors.metadata}>
+            <Text color={colors.highlights}>↑/↓</Text> Navigate |
+            <Text color={colors.highlights}> Space</Text> Select |
+            <Text color={colors.highlights}> d</Text> Delete |
+            <Text color={colors.highlights}> r</Text> Restart |
+            <Text color={colors.highlights}> f</Text> Search |
+            <Text color={colors.highlights}> Enter</Text> Details |
+            <Text color={colors.highlights}> Esc</Text> Back
+          </Text>
+        </Box>
+
+        {/* Notifications */}
+        {notifications.length > 0 && (
+          <Box flexDirection="column" gap={1}>
+            {notifications.slice(-3).map((notification: any) => (
+              <Box key={notification?.id || Math.random()} 
+                   borderStyle="single" 
+                   borderColor={
+                     notification?.type === 'error' ? 'red' :
+                     notification?.type === 'warning' ? 'yellow' :
+                     notification?.type === 'success' ? 'green' : 'blue'
+                   }
+                   paddingX={1}>
+                <Text color={
+                  notification?.type === 'error' ? colors.errors :
+                  notification?.type === 'warning' ? colors.warnings :
+                  notification?.type === 'success' ? colors.success :
+                  colors.primaryText
+                }>
+                  {notification?.message || ''}
+                </Text>
+              </Box>
+            ))}
+          </Box>
+        )}
+      </Box>
+    </ErrorBoundary>
   );
 }

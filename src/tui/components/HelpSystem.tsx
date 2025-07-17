@@ -123,12 +123,8 @@ export function HelpSystem({ visible, onClose, currentView = 'home', currentMode
 
   return (
     <Box
-      position="absolute"
-      top={0}
-      left={0}
       width="100%"
       height="100%"
-      backgroundColor={colors.backgroundSecondary}
       borderStyle="double"
       borderColor={colors.highlights}
       flexDirection="column"
@@ -164,11 +160,13 @@ export function HelpSystem({ visible, onClose, currentView = 'home', currentMode
 
       {/* Content area */}
       <Box flexDirection="column" flexGrow={1} paddingX={1}>
-        <Text bold color={colors.highlights} marginBottom={1}>
-          {currentSection.title}
-        </Text>
+        <Box marginBottom={1}>
+          <Text bold color={colors.highlights}>
+            {currentSection?.title || ''}
+          </Text>
+        </Box>
         
-        {currentSection.shortcuts.length === 0 ? (
+        {!currentSection || currentSection.shortcuts.length === 0 ? (
           <Text color={colors.metadata}>No shortcuts available for this section</Text>
         ) : (
           <Box flexDirection="column">

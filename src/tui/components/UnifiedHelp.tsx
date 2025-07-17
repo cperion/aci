@@ -59,7 +59,7 @@ export function UnifiedHelp({ visible, onClose, currentView }: UnifiedHelpProps)
     } else if (key.tab) {
       const tabs: HelpTab[] = ['shortcuts', 'commands', 'tips'];
       const currentIndex = tabs.indexOf(activeTab);
-      setActiveTab(tabs[(currentIndex + 1) % tabs.length]);
+      setActiveTab(tabs[(currentIndex + 1) % tabs.length] || 'shortcuts');
     }
   });
 
@@ -112,12 +112,8 @@ export function UnifiedHelp({ visible, onClose, currentView }: UnifiedHelpProps)
 
   return (
     <Box
-      position="absolute"
-      top={0}
-      left={0}
       width="100%"
       height="100%"
-      backgroundColor={colors.backgroundSecondary}
       borderStyle="double"
       borderColor={colors.highlights}
       flexDirection="column"
@@ -156,8 +152,8 @@ export function UnifiedHelp({ visible, onClose, currentView }: UnifiedHelpProps)
           <Text color={colors.features}>Search: </Text>
         </Box>
         <TextInput
-          value={searchQuery}
-          onChange={setSearchQuery}
+          defaultValue={searchQuery}
+          onChange={(value) => setSearchQuery(value)}
           placeholder="Type to filter..."
         />
       </Box>

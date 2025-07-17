@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Box, Text, useInput } from 'ink';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Box, Text } from 'ink';
 import { TextInput, Spinner, Alert, Select } from '@inkjs/ui';
-import { useNavigation } from '../../hooks/navigation.js';
-import { CommandFacade } from '../../utils/commandFacade.js';
+import { useNavigation } from '../../../hooks/use-navigation.js';
+import { useAuth } from '../../../hooks/use-auth.js';
+import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
+import { TuiCommandService } from '../../../services/tui-command-service.js';
+import type { CommandResult } from '../../../types/command-result.js';
 
 interface Item {
   id: string;
@@ -20,22 +23,91 @@ interface Item {
 }
 
 export function ItemsView() {
-  const { goBack, navigate, setSelection, state } = useNavigation();
+  const { goBack, navigate } = useNavigation();
+  const { authState } = useAuth();
+  const { portal: portalAuth, portalSession } = authState;
+  const [selection, setSelection] = useState<{ itemId?: string }>({});
   const [items, setItems] = useState<Item[]>([]);
   const [filteredItems, setFilteredItems] = useState<Item[]>([]);
+  const [currentItemIndex, setCurrentItemIndex] = useState(0);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedItem, setSelectedItem] = useState<string>('');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
-  const [mode, setMode] = useState<'list' | 'search' | 'share'>('list');
+  const [mode, setMode] = useState<'list' | 'search' | 'share' | 'filter' | 'confirm-delete' | 'download' | 'create-item'>('list');
   const [itemTypeFilter, setItemTypeFilter] = useState<string>('all');
 
-  const commandFacade = CommandFacade.getInstance();
+  const commandService = useMemo(() => new TuiCommandService(portalSession || undefined), [portalSession]);
+
+  // Set up keyboard handlers
+  useViewKeyboard({
+    deps: [filteredItems, currentItemIndex, selectedItem, mode],
+    handlers: {
+      j: () => setCurrentItemIndex(prev => Math.min(prev + 1, filteredItems.length - 1)),
+      k: () => setCurrentItemIndex(prev => Math.max(prev - 1, 0)),
+      Delete: () => {
+        const currentItem = filteredItems[currentItemIndex];
+        if (currentItem) {
+          setError('');
+          setMode('confirm-delete');
+          setSelectedItem(currentItem.id);
+        }
+      },
+      i: () => {
+        const currentItem = filteredItems[currentItemIndex];
+        if (currentItem) {
+          setSelection({ itemId: currentItem.id });
+          navigate('item-detail', `Item: ${currentItem.title}`);
+        }
+      },
+      h: () => {
+        const currentItem = filteredItems[currentItemIndex];
+        if (currentItem) {
+          console.log('Share item:', currentItem.title);
+          setMode('share');
+        }
+      },
+      d: () => {
+        const currentItem = filteredItems[currentItemIndex];
+        if (currentItem) {
+          setMode('download');
+          setSelectedItem(currentItem.id);
+        }
+      },
+      s: () => setMode('search'),
+      f: () => setMode('filter'),
+      c: () => setMode('create-item'),
+      r: () => loadItems(),
+      escape: () => {
+        if (mode !== 'list') {
+          setMode('list');
+        } else {
+          goBack();
+        }
+      },
+      y: () => {
+        if (mode === 'confirm-delete') {
+          // TODO: Implement actual deletion
+          console.log('Delete confirmed');
+          setMode('list');
+        } else if (mode === 'download') {
+          // TODO: Implement actual download
+          console.log('Download confirmed');
+          setMode('list');
+        }
+      }
+    }
+  });
 
   // Load items on mount
   useEffect(() => {
     loadItems();
   }, []);
+
+  // Reset current index when filtered items change
+  useEffect(() => {
+    setCurrentItemIndex(0);
+  }, [filteredItems]);
 
   // Filter items when search term or type filter changes
   useEffect(() => {
@@ -66,19 +138,33 @@ export function ItemsView() {
 
     try {
       // Check if portal is authenticated
-      if (!state.authStatus.portal) {
+      if (!portalAuth) {
         setError('Portal authentication required. Please login first.');
         setIsLoading(false);
         return;
       }
 
-      const result = await commandFacade.portalItems('*');
+      const result = await commandService.searchItems('*');
       
       if (result.success && result.data) {
-        // Parse items data from CLI output
-        const itemsData = Array.isArray(result.data) ? result.data : [];
-        setItems(itemsData);
-        setFilteredItems(itemsData);
+        const itemsData = result.data.results || [];
+        // Map to Item interface
+        const mappedItems: Item[] = itemsData.map((item: any) => ({
+          id: item.id,
+          title: item.title,
+          type: item.type,
+          owner: item.owner,
+          description: item.snippet || item.description,
+          tags: item.tags || [],
+          created: item.created || Date.now(),
+          modified: item.modified,
+          access: item.access || 'private',
+          size: item.size,
+          url: item.url,
+          numViews: item.numViews
+        }));
+        setItems(mappedItems);
+        setFilteredItems(mappedItems);
       } else {
         setError(result.error || 'Failed to load items');
       }
@@ -88,47 +174,6 @@ export function ItemsView() {
       setIsLoading(false);
     }
   };
-
-  // Global key handlers
-  useInput((input, key) => {
-    if (key.escape) {
-      if (mode === 'search' || mode === 'share') {
-        setMode('list');
-        setSearchTerm('');
-      } else {
-        goBack();
-      }
-    }
-    
-    if (mode === 'list') {
-      switch (input.toLowerCase()) {
-        case 's':
-          setMode('search');
-          break;
-        case 'r':
-          loadItems();
-          break;
-        case 'f':
-          // Cycle through item type filters
-          const filters = ['all', 'web map', 'feature service', 'map service', 'web app', 'dashboard'];
-          const currentIndex = filters.indexOf(itemTypeFilter);
-          const nextIndex = (currentIndex + 1) % filters.length;
-          setItemTypeFilter(filters[nextIndex]!);
-          break;
-        case 'h':
-          if (selectedItem) {
-            setMode('share');
-          }
-          break;
-        case 'i':
-          if (selectedItem) {
-            setSelection({ itemId: selectedItem });
-            navigate('item-detail', `Item: ${selectedItem}`);
-          }
-          break;
-      }
-    }
-  });
 
   const handleItemSelect = (itemId: string) => {
     setSelectedItem(itemId);
@@ -140,7 +185,7 @@ export function ItemsView() {
   };
 
   // Check authentication status
-  if (!state.authStatus.portal) {
+  if (!portalAuth) {
     return (
       <Box flexDirection="column" gap={1}>
         <Text bold color="yellow">Authentication Required</Text>
@@ -200,6 +245,73 @@ export function ItemsView() {
         <Alert variant="info" title="Feature Coming Soon">
           Item sharing functionality will be available in the next update.
         </Alert>
+        <Text dimColor>Press <Text color="cyan">Esc</Text> to go back</Text>
+      </Box>
+    );
+  }
+
+  if (mode === 'filter') {
+    const uniqueTypes = ['all', ...new Set(items.map(item => item.type))];
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="blue">Filter Items by Type</Text>
+        <Text dimColor>Current filter: {itemTypeFilter}</Text>
+        <Box flexDirection="column" gap={1}>
+          {uniqueTypes.slice(0, 8).map(type => (
+            <Text key={type} color={type === itemTypeFilter ? 'cyan' : 'white'}>
+              {type === itemTypeFilter ? '▶ ' : '  '}{type} ({type === 'all' ? items.length : items.filter(i => i.type === type).length})
+            </Text>
+          ))}
+          {uniqueTypes.length > 8 && (
+            <Text dimColor>... and {uniqueTypes.length - 8} more types</Text>
+          )}
+        </Box>
+        <Text dimColor>Press <Text color="cyan">Enter</Text> to apply filter, <Text color="cyan">Esc</Text> to cancel</Text>
+      </Box>
+    );
+  }
+
+  if (mode === 'confirm-delete') {
+    const itemToDelete = items.find(i => i.id === selectedItem);
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="red">Confirm Item Deletion</Text>
+        <Alert variant="warning" title="Destructive Action">
+          Are you sure you want to delete item '{itemToDelete?.title}'?
+        </Alert>
+        <Text dimColor>This action cannot be undone. Type: {itemToDelete?.type}</Text>
+        <Box marginTop={1}>
+          <Text>Press <Text color="red">y</Text> to confirm, <Text color="cyan">Esc</Text> to cancel</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (mode === 'download') {
+    const itemToDownload = items.find(i => i.id === selectedItem);
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="green">Download Item</Text>
+        <Alert variant="info" title="Download Options">
+          Download '{itemToDownload?.title}' ({itemToDownload?.type})
+        </Alert>
+        <Text dimColor>Size: {itemToDownload?.size ? `${(itemToDownload.size / 1024 / 1024).toFixed(2)} MB` : 'Unknown'}</Text>
+        <Text dimColor>This will download the item to your local machine.</Text>
+        <Box marginTop={1}>
+          <Text>Press <Text color="green">y</Text> to download, <Text color="cyan">Esc</Text> to cancel</Text>
+        </Box>
+      </Box>
+    );
+  }
+
+  if (mode === 'create-item') {
+    return (
+      <Box flexDirection="column" gap={1}>
+        <Text bold color="blue">Create New Item</Text>
+        <Alert variant="info" title="Feature Coming Soon">
+          Item creation functionality will be available in the next update.
+        </Alert>
+        <Text dimColor>Available types: Web Map, Web App, Feature Service, Map Service</Text>
         <Text dimColor>Press <Text color="cyan">Esc</Text> to go back</Text>
       </Box>
     );
@@ -280,8 +392,11 @@ export function ItemsView() {
         <Text>  <Text color="cyan">s</Text> - Search items</Text>
         <Text>  <Text color="cyan">f</Text> - Filter by type ({itemTypeFilter})</Text>
         <Text>  <Text color="cyan">r</Text> - Refresh list</Text>
+        <Text>  <Text color="cyan">c</Text> - Create new item</Text>
         <Text>  <Text color="cyan">h</Text> - Share selected item</Text>
+        <Text>  <Text color="cyan">d</Text> - Download selected item</Text>
         <Text>  <Text color="cyan">i</Text> - Inspect selected item</Text>
+        <Text>  <Text color="cyan">Del</Text> - Delete selected item</Text>
         <Text>  <Text color="cyan">Esc</Text> - Go back</Text>
       </Box>
 

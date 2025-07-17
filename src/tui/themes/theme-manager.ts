@@ -5,6 +5,11 @@ export interface ThemeState {
   current: Base16Theme;
   colors: ArcGISColorMapping;
   name: string;
+  contrastIssues?: Array<{
+    pair: [string, string];
+    ratio: number;
+    adjusted: boolean;
+  }>;
 }
 
 export class ThemeManager {
@@ -13,9 +18,9 @@ export class ThemeManager {
   private listeners: Array<(state: ThemeState) => void> = [];
 
   private constructor() {
-    // Initialize with gruvbox-dark-medium if available, otherwise first theme
-    const defaultTheme = themeLoader.setTheme('gruvbox-dark-medium') 
-      ? 'gruvbox-dark-medium' 
+    // Initialize with gruvbox-light-medium if available, otherwise first theme
+    const defaultTheme = themeLoader.setTheme('gruvbox-light-medium') 
+      ? 'gruvbox-light-medium' 
       : themeLoader.getAvailableThemes()[0]?.name || '';
     
     if (defaultTheme) {
@@ -27,10 +32,12 @@ export class ThemeManager {
       throw new Error('No themes available');
     }
 
+    const colorMapping = themeLoader.mapToArcGIS(current);
     this.state = {
       current,
-      colors: themeLoader.mapToArcGIS(current),
-      name: defaultTheme
+      colors: colorMapping,
+      name: defaultTheme,
+      contrastIssues: colorMapping.contrastIssues
     };
   }
 
@@ -49,10 +56,12 @@ export class ThemeManager {
     if (themeLoader.setTheme(themeName)) {
       const current = themeLoader.getCurrentTheme();
       if (!current) return false;
+      const colorMapping = themeLoader.mapToArcGIS(current);
       this.state = {
         current,
-        colors: themeLoader.mapToArcGIS(current),
-        name: themeName
+        colors: colorMapping,
+        name: themeName,
+        contrastIssues: colorMapping.contrastIssues
       };
       this.notifyListeners();
       return true;

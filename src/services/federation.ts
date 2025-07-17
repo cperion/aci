@@ -1,14 +1,35 @@
-import { request } from '@esri/arcgis-rest-request';
-import { UserSession } from '@esri/arcgis-rest-auth';
+import { arcgisPostRequest, arcgisRequest, normalizeServerUrl } from './http-client.js';
+import type { UserSession, FederatedToken } from '../types/arcgis-raw.js';
+import { isTokenResponse } from '../types/arcgis-raw.js';
 
-interface FederatedToken {
-  token: string;
-  expires: number;
-  server: string;
-}
-
-// Simple in-memory token store (replaces LRU cache)
+// Simple in-memory token store with size limits to prevent memory leaks
+const MAX_CACHE_SIZE = parseInt(process.env.MAX_TOKEN_CACHE || '100');
 const tokenStore = new Map<string, FederatedToken>();
+
+/**
+ * Compresses the token cache when it exceeds size limits
+ * Removes expired tokens first, then oldest entries
+ */
+function compressTokenCache(): void {
+  if (tokenStore.size <= MAX_CACHE_SIZE) return;
+
+  const now = Date.now();
+  
+  // Priority 1: Remove expired tokens
+  const expiredKeys = Array.from(tokenStore.entries())
+    .filter(([_, token]) => token.expires <= now)
+    .map(([key]) => key);
+  
+  expiredKeys.forEach(key => tokenStore.delete(key));
+  
+  // Priority 2: If still over limit, remove oldest entries
+  if (tokenStore.size > MAX_CACHE_SIZE) {
+    const keysToRemove = Array.from(tokenStore.keys())
+      .slice(0, tokenStore.size - MAX_CACHE_SIZE);
+    
+    keysToRemove.forEach(key => tokenStore.delete(key));
+  }
+}
 
 /**
  * Gets a federated token for an ArcGIS Server from a Portal session
@@ -37,6 +58,9 @@ export async function getFederatedToken(
       server: normalizedUrl
     });
     
+    // Compress cache if needed to prevent memory leaks
+    compressTokenCache();
+    
     return federatedToken;
     
   } catch (error) {
@@ -55,18 +79,12 @@ async function generateServerToken(
   // Use the correct enterprise portal token generation endpoint
   const tokenEndpoint = `${session.portal}/generateToken`;
   
-  const response = await request(tokenEndpoint, {
-    httpMethod: 'POST',
-    params: {
-      serverUrl,
-      token: session.token,
-      expiration: 60, // 1 hour
-      f: 'json'
-    },
-    authentication: session
-  });
+  const response = await arcgisPostRequest(tokenEndpoint, {
+    serverUrl,
+    expiration: '60', // 1 hour (as string)
+  }, session);
 
-  if (!response.token) {
+  if (!isTokenResponse(response)) {
     throw new Error(`Failed to generate federated token for ${serverUrl}`);
   }
 
@@ -97,18 +115,6 @@ function handleFederationFailure(
   throw new Error(`Federation token generation failed for ${serverUrl}: ${error.message}`);
 }
 
-/**
- * Normalizes server URLs for consistent caching
- */
-function normalizeServerUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    // Remove path and query parameters, keep just protocol + host + port
-    return `${parsed.protocol}//${parsed.host}`;
-  } catch {
-    return url;
-  }
-}
 
 /**
  * Checks if a server is federated with the given portal
@@ -118,9 +124,7 @@ export async function isServerFederated(
   serverUrl: string
 ): Promise<boolean> {
   try {
-    const serverInfo = await request(`${serverUrl}/rest/info`, {
-      params: { f: 'json' }
-    });
+    const serverInfo = await arcgisRequest(`${serverUrl}/rest/info`);
     
     if (serverInfo.portalUrl) {
       const serverPortal = normalizeServerUrl(serverInfo.portalUrl);
@@ -148,6 +152,7 @@ export function clearFederationCache(): void {
 export function getFederationCacheStats() {
   return {
     size: tokenStore.size,
+    maxSize: MAX_CACHE_SIZE,
     keys: Array.from(tokenStore.keys())
   };
 }

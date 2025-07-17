@@ -75,11 +75,24 @@ export interface BackupInfo {
 }
 
 /**
+ * Configuration for registering a new data store
+ */
+export interface DataStoreRegistrationConfig {
+  name: string;
+  type: DataStoreType;
+  provider?: string;
+  onServerStart?: boolean;
+  isManaged?: boolean;
+  connectionParams: Record<string, string>;
+}
+
+/**
  * Raw API response types for normalization
  */
 export interface RawDataStoreResponse {
-  folders: string[];
-  datastores: Array<{
+  rootItems: string[];
+  folders?: string[];
+  datastores?: Array<{
     name: string;
     type: string;
     provider?: string;

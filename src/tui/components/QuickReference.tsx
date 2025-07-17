@@ -149,11 +149,7 @@ export function QuickReference({ visible, onClose, viewId }: QuickReferenceProps
 
   return (
     <Box
-      position="absolute"
-      top={2}
-      right={2}
       width={60}
-      backgroundColor={colors.backgroundSecondary}
       borderStyle="round"
       borderColor={colors.highlights}
       flexDirection="column"
@@ -171,11 +167,13 @@ export function QuickReference({ visible, onClose, viewId }: QuickReferenceProps
 
       {/* Shortcut groups */}
       <Box flexDirection="row" gap={2}>
-        {currentReference.map((group, groupIndex) => (
+        {currentReference?.map((group, groupIndex) => (
           <Box key={group.title} flexDirection="column" flexGrow={1}>
-            <Text bold color={colors.features} marginBottom={1}>
-              {group.title}
-            </Text>
+            <Box marginBottom={1}>
+              <Text bold color={colors.features}>
+                {group.title}
+              </Text>
+            </Box>
             {group.shortcuts.map((shortcut) => (
               <Box key={shortcut.key} marginBottom={0}>
                 <Box width={8}>

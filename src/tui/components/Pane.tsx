@@ -6,13 +6,16 @@ import type { PaneProps } from '../types.js';
 export function Pane({ title, children, isActive = false, width = 25 }: PaneProps) {
   const { colors } = useTheme();
   
+  // Create vertical separators using borderLeft for middle and right panes
+  const showLeftBorder = width === 50 || width === 20; // Content and Inspection panes
+  
   return (
     <Box
       flexDirection="column"
       width={`${width}%`}
       paddingX={1}
-      borderStyle="single"
-      borderColor={isActive ? colors.highlights : colors.separators}
+      borderLeft={showLeftBorder}
+      borderColor={colors.separators}
     >
       <Box 
         borderBottom 
