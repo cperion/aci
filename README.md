@@ -10,6 +10,9 @@ A TypeScript-based command-line interface for interacting with the ArcGIS ecosys
 - **Environment Management**: Switch between development, testing, and production environments
 - **Federation Support**: Automatic Portal-to-Server authentication token exchange
 - **Secure Session Management**: Encrypted token storage using system keychain
+- **Datastore Management**: Complete datastore registration, validation, and monitoring
+- **Server Administration**: Comprehensive ArcGIS Server management capabilities
+- **Terminal UI**: Interactive TUI mode with keyboard shortcuts and theme support
 
 ## Installation
 
@@ -185,6 +188,78 @@ aci admin health
 aci admin status
 ```
 
+### Datastore Management
+
+```bash
+# List all registered datastores
+aci admin datastores list
+
+# Validate datastore health
+aci admin datastores validate <name>
+
+# Show machine status for datastore
+aci admin datastores machines <name>
+
+# Show backup information
+aci admin datastores backup-info
+
+# Register new datastore
+aci admin datastores register <name> --type enterprise --host db.company.com --port 5432 --database gis --username gis_user --password mypass
+
+# Update datastore configuration
+aci admin datastores update <name> --host newdb.company.com --port 5433
+
+# Unregister datastore
+aci admin datastores unregister <name>
+```
+
+### Portal Management
+
+```bash
+# User operations
+aci users find "admin*"
+aci users get jsmith
+aci users list
+
+# Group operations
+aci groups find "gis*"
+aci groups create "Dev Team" --access private
+aci groups get group-id
+
+# Item operations
+aci items find "transportation"
+aci items get item-id
+aci items share item-id --groups group1,group2
+```
+
+### Analytics and Insights
+
+```bash
+# Authentication failure analysis
+aci insights auth-failures --days 7
+
+# Service health trends
+aci insights service-health --service "MyService"
+
+# Command execution patterns
+aci insights command-trends --top 10
+
+# Advanced template analysis
+aci analyze template auth-correlation
+aci analyze sql "SELECT * FROM audit_logs LIMIT 10"
+aci analyze schema
+```
+
+### Terminal UI Mode
+
+```bash
+# Launch interactive TUI
+aci --tui
+
+# Test available themes
+aci theme-test
+```
+
 ### Admin Session Management
 
 ```bash
@@ -295,6 +370,31 @@ aci login --env prod --token PROD_TOKEN
 aci query https://service-url --env prod
 ```
 
+### Enterprise Datastore Management
+
+```bash
+# Complete datastore workflow
+aci admin login --server https://server.com/arcgis/admin --username admin
+aci admin datastores list
+aci admin datastores validate problematic-datastore
+aci admin datastores machines problematic-datastore
+
+# Bulk datastore health check
+for store in $(aci admin datastores list --format json | jq -r '.[].name'); do
+  echo "Checking $store..."
+  aci admin datastores validate "$store"
+done
+
+# Register new enterprise database
+aci admin datastores register mydb \
+  --type enterprise \
+  --host postgres.company.com \
+  --port 5432 \
+  --database gis_production \
+  --username gis_user \
+  --password secure_password
+```
+
 ## Error Handling
 
 The CLI provides detailed error messages and recovery suggestions:
@@ -372,15 +472,31 @@ src/
 ├── cli.ts                     # Entry point and Commander setup
 ├── session.ts                 # Session management and environment config
 ├── commands/                  # Command implementations
+│   ├── admin.ts              # Admin operations and command registration
 │   ├── auth.ts               # Login/logout/status commands
+│   ├── datastores.ts         # Datastore management commands
+│   ├── groups.ts             # Group operations
+│   ├── items.ts              # Item operations
+│   ├── users.ts              # User operations
+│   ├── insights.ts           # Analytics and insights
 │   ├── query.ts              # Feature querying
 │   ├── inspect.ts            # Service metadata inspection
 │   └── register.ts           # Command registration
 ├── services/                  # Core services
+│   ├── admin-client.ts       # ArcGIS Server admin client
 │   ├── arcgis-client.ts      # ArcGIS API client wrappers
 │   ├── federation.ts         # Token federation and caching
 │   └── validator.ts          # URL validation and service detection
+├── tui/                       # Terminal UI implementation
+│   ├── app.tsx               # Main TUI application
+│   ├── components/           # TUI components
+│   ├── themes/               # Theme definitions
+│   └── hooks/                # React hooks for TUI
+├── types/                     # TypeScript type definitions
+│   ├── datastore.ts          # Datastore types
+│   └── ...                   # Other type definitions
 └── utils/                     # Utilities
+    ├── database.ts           # SQLite database wrapper
     ├── output.ts             # Formatting and display
     └── interactive.ts        # User prompts and TTY detection
 ```
@@ -403,6 +519,18 @@ src/
 - Validate `.acirc` file format
 - Check environment name spelling
 - Ensure portal URLs are complete and accessible
+
+**Datastore Issues**
+- Use `aci admin datastores list` to verify datastore registration
+- Check if databases have changed (server moves, credential rotation)
+- Validate datastore health with `aci admin datastores validate <name>`
+- Unhealthy datastores may need revalidation after infrastructure changes
+- For registration issues, ensure database connectivity from ArcGIS Server
+
+**Admin Session Issues**
+- Ensure admin session persistence with `aci admin status`
+- Re-login if session expired: `aci admin login --server <url> --username <user>`
+- Check server URL format: `https://server.com/arcgis/admin`
 
 ### Debug Mode
 
