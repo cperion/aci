@@ -162,11 +162,16 @@ export const ColumnList: React.FC<ColumnListProps> = ({
 
     // Use temp selection during filter mode, store selection otherwise
     const currentSelectedIndex = filterMode ? tempSelectedIndex : column.selectedIndex;
-    
-    // Calculate visible range for virtualization with scroll offset
-    const centerIndex = currentSelectedIndex + scrollOffset;
-    const startIndex = Math.max(0, centerIndex - Math.floor(contentHeight / 2));
-    const endIndex = Math.min(visibleNodes.length, startIndex + contentHeight);
+
+    // Adjust scroll offset to keep selection visible
+    if (currentSelectedIndex < scrollOffset) {
+      setScrollOffset(currentSelectedIndex);
+    } else if (currentSelectedIndex >= scrollOffset + contentHeight) {
+      setScrollOffset(Math.max(0, currentSelectedIndex - contentHeight + 1));
+    }
+
+    const startIndex = scrollOffset;
+    const endIndex = Math.min(visibleNodes.length, scrollOffset + contentHeight);
     const visibleRange = visibleNodes.slice(startIndex, endIndex);
 
     return (

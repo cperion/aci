@@ -18,11 +18,8 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({ onClose }) => {
   const getNode = useEntitiesStore((state) => state.getNode);
   const { setScope, path, navigateToNode } = useNavigationStore();
 
-  // Get all searchable nodes
-  const allNodes = useMemo(() => {
-    const nodes: Node[] = Object.values(useEntitiesStore.getState().byId);
-    return nodes.filter(node => node.name || node.url);
-  }, []);
+  // Get all searchable nodes (reactive to entities store)
+  const allNodes = useEntitiesStore((s) => Object.values(s.byId).filter((n: any) => n && (n.name || n.url)) as Node[]);
 
   // Filter nodes based on query
   const filteredNodes = useMemo(() => {

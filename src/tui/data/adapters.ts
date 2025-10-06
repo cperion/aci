@@ -6,6 +6,7 @@
 import { TuiCommandService } from '../../services/tui-command-service.js';
 import type { Node } from '../data/types.js';
 import { useUiStore } from '../state/ui.js';
+import { getAdminSession, getSession, getPortalUrl } from '../../session.js';
 
 // Initialize service instance
 const commandService = new TuiCommandService();
@@ -23,13 +24,8 @@ function pushError(message: string): void {
 /**
  * Map server services to nodes
  */
-export async function listServerRoot(host: string): Promise<Node[]> {
+export async function listServerRoot(): Promise<Node[]> {
   try {
-    if (!host) {
-      pushError('Server host is required');
-      return [];
-    }
-
     // Use listServices to get available services
     const res = await commandService.listServices();
     
@@ -39,17 +35,45 @@ export async function listServerRoot(host: string): Promise<Node[]> {
     }
 
     const services = res.data || [];
-    
+
+    // Compute server REST base URL
+    let serverRestBase: string | null = null;
+    try {
+      const adminSession = await getAdminSession();
+      if (adminSession?.serverAdminUrl) {
+        serverRestBase = adminSession.serverAdminUrl.replace('/admin', '/rest/services');
+      }
+    } catch {}
+    if (!serverRestBase) {
+      const userSession = await getSession();
+      if (userSession?.portal) {
+        try {
+          const origin = new URL(userSession.portal).origin;
+          serverRestBase = `${origin}/arcgis/rest/services`;
+        } catch {}
+      }
+    }
+    if (!serverRestBase) {
+      try {
+        const portal = getPortalUrl();
+        const origin = new URL(portal).origin;
+        serverRestBase = `${origin}/arcgis/rest/services`;
+      } catch {
+        pushError('Unable to derive server REST base URL');
+        return [];
+      }
+    }
+
     return services.map((service: any) => {
       const serviceName = service.name || service.folderName || 'Unknown';
       const serviceType = service.type || 'MapServer';
-      const cleanName = serviceName.replace(/(MapServer|FeatureServer|ImageServer)$/, '');
-      
+      const cleanName = serviceName.replace(/(MapServer|FeatureServer|ImageServer)$/i, '');
+      const restPath = `${serviceName}.${serviceType}`;
       return {
-        id: `${host}/${serviceName}`,
+        id: `${serverRestBase}/${restPath}`,
         kind: 'serverService' as const,
         name: cleanName,
-        url: `${host}/${serviceName}`,
+        url: `${serverRestBase}/${restPath}`,
         meta: { 
           type: serviceType,
           description: service.description,
@@ -150,35 +174,34 @@ export function listLayerOperations(url: string): Promise<Node[]> {
 /**
  * List portal root entries
  */
-export async function listPortalRoot(host: string): Promise<Node[]> {
+export async function listPortalRoot(): Promise<Node[]> {
   try {
-    if (!host) {
-      pushError('Portal host is required');
-      return [];
-    }
+    let portalBase = getPortalUrl();
+    const session = await getSession();
+    if (session?.portal) portalBase = session.portal;
 
     return [
       {
-        id: `${host}/users`,
+        id: `${portalBase}/community/users`,
         kind: 'portalUsers' as const,
         name: 'Users',
-        url: `${host}/users`,
+        url: `${portalBase}/community/users`,
         meta: { description: 'Portal users' },
         childrenKind: 'portalUser'
       },
       {
-        id: `${host}/groups`,
+        id: `${portalBase}/community/groups`,
         kind: 'portalGroups' as const,
         name: 'Groups',
-        url: `${host}/groups`,
+        url: `${portalBase}/community/groups`,
         meta: { description: 'Portal groups' },
         childrenKind: 'portalGroup'
       },
       {
-        id: `${host}/content/items`,
+        id: `${portalBase}/content/items`,
         kind: 'portalItems' as const,
         name: 'Items',
-        url: `${host}/content/items`,
+        url: `${portalBase}/content/items`,
         meta: { description: 'Portal content items' },
         childrenKind: 'portalItem'
       }
@@ -192,12 +215,11 @@ export async function listPortalRoot(host: string): Promise<Node[]> {
 /**
  * List portal users
  */
-export async function listPortalUsers(host: string): Promise<Node[]> {
+export async function listPortalUsers(): Promise<Node[]> {
   try {
-    if (!host) {
-      pushError('Portal host is required');
-      return [];
-    }
+    let portalBase = getPortalUrl();
+    const session = await getSession();
+    if (session?.portal) portalBase = session.portal;
 
     const res = await commandService.searchUsers('*', { limit: 100 });
     
@@ -209,10 +231,10 @@ export async function listPortalUsers(host: string): Promise<Node[]> {
     const users = res.data?.results || [];
     
     return users.map((user: any) => ({
-      id: `${host}/users/${user.username}`,
+      id: `${portalBase}/content/users/${user.username}`,
       kind: 'portalUser' as const,
       name: user.username || user.name || 'Unknown User',
-      url: `${host}/users/${user.username}`,
+      url: `${portalBase}/content/users/${user.username}`,
       meta: {
         username: user.username,
         fullName: user.fullName,
@@ -231,12 +253,11 @@ export async function listPortalUsers(host: string): Promise<Node[]> {
 /**
  * List portal groups
  */
-export async function listPortalGroups(host: string): Promise<Node[]> {
+export async function listPortalGroups(): Promise<Node[]> {
   try {
-    if (!host) {
-      pushError('Portal host is required');
-      return [];
-    }
+    let portalBase = getPortalUrl();
+    const session = await getSession();
+    if (session?.portal) portalBase = session.portal;
 
     const res = await commandService.searchGroups('*', { limit: 100 });
     
@@ -248,10 +269,10 @@ export async function listPortalGroups(host: string): Promise<Node[]> {
     const groups = res.data?.results || [];
     
     return groups.map((group: any) => ({
-      id: `${host}/groups/${group.id}`,
+      id: `${portalBase}/community/groups/${group.id}`,
       kind: 'portalGroup' as const,
       name: group.title || group.name || 'Unknown Group',
-      url: `${host}/groups/${group.id}`,
+      url: `${portalBase}/community/groups/${group.id}`,
       meta: {
         id: group.id,
         description: group.description,
@@ -270,12 +291,11 @@ export async function listPortalGroups(host: string): Promise<Node[]> {
 /**
  * List portal items
  */
-export async function listPortalItems(host: string): Promise<Node[]> {
+export async function listPortalItems(): Promise<Node[]> {
   try {
-    if (!host) {
-      pushError('Portal host is required');
-      return [];
-    }
+    let portalBase = getPortalUrl();
+    const session = await getSession();
+    if (session?.portal) portalBase = session.portal;
 
     const res = await commandService.searchItems('*', { limit: 100 });
     
@@ -287,10 +307,10 @@ export async function listPortalItems(host: string): Promise<Node[]> {
     const items = res.data?.results || [];
     
     return items.map((item: any) => ({
-      id: `${host}/content/items/${item.id}`,
+      id: `${portalBase}/content/items/${item.id}`,
       kind: 'portalItem' as const,
       name: item.title || item.name || 'Unknown Item',
-      url: `${host}/content/items/${item.id}`,
+      url: `${portalBase}/content/items/${item.id}`,
       meta: {
         id: item.id,
         type: item.type,

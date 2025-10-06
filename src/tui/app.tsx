@@ -17,12 +17,10 @@ export type TUIAppProps = {
   portal?: string;
   username?: string;
   isAdmin?: boolean;
-  serverHost?: string;
-  portalHost?: string;
   initialTheme?: string;
 };
 
-function TUIApp({ portal, username, isAdmin, serverHost, portalHost, initialTheme }: TUIAppProps) {
+function TUIApp({ portal, username, isAdmin, initialTheme }: TUIAppProps) {
   const { overlays } = useUiStore();
   const showHelp = overlays.help;
 
@@ -49,14 +47,7 @@ function TUIApp({ portal, username, isAdmin, serverHost, portalHost, initialThem
     }
   }, [initialTheme]);
 
-  // Set hosts in navigation store
-  useEffect(() => {
-    if (serverHost || portalHost) {
-      import('./state/navigation.js').then(({ useNavigationStore }) => {
-        useNavigationStore.getState().setHosts(serverHost, portalHost);
-      });
-    }
-  }, [serverHost, portalHost]);
+  // Hosts are derived from environment/session; no explicit host flags
 
   // Validate theme contrast in development
   useEffect(() => {

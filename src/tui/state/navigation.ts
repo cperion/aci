@@ -13,14 +13,10 @@ import {
 import { useEntitiesStore } from './entities';
 import { useUiStore } from './ui';
 
-interface NavigationState extends MillerState {
-  serverHost?: string;
-  portalHost?: string;
-}
+interface NavigationState extends MillerState {}
 
 interface NavigationActions {
   setScope: (scope: 'server' | 'portal') => void;
-  setHosts: (serverHost?: string, portalHost?: string) => void;
   focusColumn: (index: number) => void;
   moveSelection: (delta: number) => void;
   enter: () => Promise<void>;
@@ -50,8 +46,6 @@ function createInitialColumn(): ColumnState {
 export const useNavigationStore = create<NavigationSlice>((set, get) => ({
   // Initial state
   scope: 'server',
-  serverHost: undefined,
-  portalHost: undefined,
   activeColumn: 0,
   columns: [createInitialColumn(), createInitialColumn()],
   path: [],
@@ -66,10 +60,6 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
     });
     // Load root for the new scope
     void get().loadRoot();
-  },
-
-  setHosts: (serverHost?: string, portalHost?: string) => {
-    set({ serverHost, portalHost });
   },
 
   focusColumn: (index: number) => {
@@ -182,18 +172,8 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
 
   // Helper methods
   loadRoot: async () => {
-    const { scope, serverHost, portalHost } = get();
+    const { scope } = get();
     const { upsertNodes } = useEntitiesStore.getState();
-    
-    // Check if required host is available
-    const host = scope === 'server' ? serverHost : portalHost;
-    if (!host) {
-      useUiStore.getState().pushNotice({
-        level: 'warn',
-        text: `Please set ${scope} host using CLI flags`,
-      });
-      return;
-    }
     
     set((state) => {
       const newColumns = [...state.columns];
@@ -209,9 +189,9 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
     try {
       let nodes;
       if (scope === 'server') {
-        nodes = await listServerRoot(serverHost!);
+        nodes = await listServerRoot();
       } else {
-        nodes = await listPortalRoot(portalHost!);
+        nodes = await listPortalRoot();
       }
 
       upsertNodes(nodes, null); // Root nodes have no parent
@@ -246,7 +226,7 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
   },
 
   loadChildrenForSelection: async () => {
-    const { activeColumn, columns, serverHost, portalHost } = get();
+    const { activeColumn, columns } = get();
     const column = columns[activeColumn];
     if (!column) return;
 
@@ -286,13 +266,13 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
           children = await listLayerOperations(selectedNode.url);
           break;
         case 'portalUsers':
-          children = await listPortalUsers(portalHost!);
+          children = await listPortalUsers();
           break;
         case 'portalGroups':
-          children = await listPortalGroups(portalHost!);
+          children = await listPortalGroups();
           break;
         case 'portalItems':
-          children = await listPortalItems(portalHost!);
+          children = await listPortalItems();
           break;
         case 'portalItem':
           children = await listPortalItemOperations(selectedNode.url);
@@ -347,88 +327,44 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
 
   navigateToNode: async (nodeId: string) => {
     const { getParent } = useEntitiesStore.getState();
-    
+
     // Build path by walking parents map
     const pathIds: string[] = [];
     let currentId: string | null = nodeId;
-    
     while (currentId !== null) {
       pathIds.push(currentId);
       currentId = getParent(currentId);
     }
-    
-    // Reverse to get path from root to target
     const pathFromRoot = pathIds.reverse();
-    
-    // Reset columns and rebuild path
-    set((state) => ({
-      columns: [createInitialColumn(), createInitialColumn()],
-      path: [],
-      activeColumn: 0,
-    }));
 
-    // Load and navigate step by step
+    // Reset columns and load root
+    set({ columns: [createInitialColumn(), createInitialColumn()], path: [], activeColumn: 0 });
+    await get().loadRoot();
+
+    // Step through each segment, selecting and entering
     for (let i = 0; i < pathFromRoot.length; i++) {
       const targetId = pathFromRoot[i];
-      
-      // For root level, make sure we have the root loaded
-      if (i === 0) {
-        await get().loadRoot();
-      }
-      
-      // Find the target node in the current column
       const { activeColumn, columns } = get();
       const column = columns[activeColumn];
-      if (!column) continue;
-      
+      if (!column) break;
+
       const filteredNodes = getFilteredNodes(column);
-      const targetIndex = filteredNodes.findIndex(node => node.id === targetId);
-      
-      if (targetIndex >= 0) {
-        // Select the target node
-        set((state) => {
-          const newColumns = [...state.columns];
-          newColumns[activeColumn] = { ...column, selectedIndex: targetIndex };
-          return { columns: newColumns };
-        });
-        
-        // If not the last node, enter it to load children
-        if (i < pathFromRoot.length - 1) {
-          await get().enter();
-        }
-      } else {
-        // Node not found, try to load parent's children first
-        if (i > 0) {
-          const parentId = pathFromRoot[i - 1];
-          if (parentId) { // Add type guard
-            const parentNode = useEntitiesStore.getState().getNode(parentId);
-            if (parentNode && !parentNode.childrenLoaded) {
-            // Go back to parent and load children
-            set((state) => ({ activeColumn: Math.max(0, activeColumn - 1) }));
-            await get().loadChildrenForSelection();
-            
-            // Try again to find the target
-            const { columns: updatedColumns } = get();
-            const updatedColumn = updatedColumns[activeColumn];
-            if (updatedColumn) {
-              const updatedFilteredNodes = getFilteredNodes(updatedColumn);
-              const updatedTargetIndex = updatedFilteredNodes.findIndex(node => node.id === targetId);
-              
-              if (updatedTargetIndex >= 0) {
-                set((state) => {
-                  const newColumns = [...state.columns];
-                  newColumns[activeColumn] = { ...updatedColumn, selectedIndex: updatedTargetIndex };
-                  return { columns: newColumns };
-                });
-                
-                if (i < pathFromRoot.length - 1) {
-                  await get().enter();
-                }
-              }
-            }
-          }
-        }
-        }
+      const idx = filteredNodes.findIndex(n => n.id === targetId);
+      if (idx < 0) {
+        useUiStore.getState().pushNotice({ level: 'warn', text: 'Target path not fully cached; navigate stepwise.' });
+        break;
+      }
+
+      // Select target in this column
+      set((state) => {
+        const newColumns = [...state.columns];
+        newColumns[activeColumn] = { ...column, selectedIndex: idx };
+        return { columns: newColumns };
+      });
+
+      // Enter unless last segment
+      if (i < pathFromRoot.length - 1) {
+        await get().enter();
       }
     }
   },
