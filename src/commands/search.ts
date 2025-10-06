@@ -1,8 +1,7 @@
 import { getSession } from '../session.js';
 import type { Environment } from '../session.js';
-import { arcgisRequest } from '../services/http-client.js';
+import { searchItems } from '../core/portal.js';
 import { handleError } from '../errors/handler.js';
-import type { UserSession } from '../types/arcgis-raw.js';
 
 interface SearchOptions {
   type?: string;
@@ -37,8 +36,14 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
     console.log(`Searching portal for: "${query}"`);
     console.log(`Portal: ${session.portal}`);
     
-    // Use direct API call for portal search
-    const results = await searchPortalItems(query, options, session);
+    // Use Core function for portal search
+    const results = await searchItems({
+      query,
+      type: options.type,
+      owner: options.owner,
+      limit: options.limit ? parseInt(options.limit) : undefined,
+      session
+    });
     
     if (options.json) {
       console.log(JSON.stringify(results, null, 2));
@@ -49,47 +54,6 @@ export async function searchCommand(query: string, options: SearchOptions): Prom
   } catch (error) {
     handleError(error, 'Portal search failed');
   }
-}
-
-// Portal search using raw API
-async function searchPortalItems(query: string, options: SearchOptions, session: UserSession): Promise<SearchResult> {
-  // Ensure we use the correct portal URL structure
-  let portalBaseUrl = session.portal;
-  if (!portalBaseUrl.includes('/sharing/rest')) {
-    portalBaseUrl = `${portalBaseUrl}/portal/sharing/rest`;
-  }
-  
-  const searchUrl = `${portalBaseUrl}/search`;
-  
-  // Build query string
-  let searchQuery = query;
-  
-  // Add type filter if specified
-  if (options.type) {
-    searchQuery += ` type:"${options.type}"`;
-  }
-  
-  // Add owner filter if specified
-  if (options.owner) {
-    searchQuery += ` owner:${options.owner}`;
-  }
-  
-  console.log(`Search query: ${searchQuery}`);
-  
-  // Set search parameters
-  const params = {
-    q: searchQuery,
-    num: options.limit || '10',
-    start: '1'
-  };
-  
-  const results = await arcgisRequest(searchUrl, params, session);
-  
-  if (results.error) {
-    throw new Error(`Search failed: ${results.error.message}`);
-  }
-  
-  return results;
 }
 
 function formatSearchResults(results: SearchResult): void {

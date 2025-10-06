@@ -1,7 +1,7 @@
 import { getSession } from '../session.js';
 import type { Environment } from '../session.js';
 import { detectServiceType, validateUrl } from '../services/validator.js';
-import { queryFeatures } from '../services/arcgis-client.js';
+import { queryFeatures } from '../core/server.js';
 import { handleError } from '../errors/handler.js';
 import { formatQueryResults } from '../utils/output.js';
 import type { QueryResponse, Feature } from '../types/arcgis-raw.js';
@@ -48,9 +48,9 @@ export async function queryCommand(url: string, options: CommandQueryOptions): P
     // Execute query
     const results = await queryFeatures(url, {
       where: whereClause,
-      outFields,
-      resultRecordCount: limit
-    }, session || undefined);
+      limit: limit,
+      session: session || undefined
+    });
     
     // Check for transfer limit exceeded
     if (results.exceededTransferLimit) {

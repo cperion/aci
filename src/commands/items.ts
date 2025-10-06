@@ -1,158 +1,63 @@
 import { getSession } from '../session.js';
 import { formatItem, formatItemsTable } from '../utils/output.js';
+import { findItems, getItem, shareItem } from '../core/portal.js';
+import { handlePortalError } from '../utils/portal-utils.js';
 
 export async function findItemsCommand(query: string, options: any): Promise<void> {
   try {
-    const session = await getSession();
-    if (!session) {
-      console.error('Not authenticated. Please run: aci login');
-      process.exit(1);
-    }
-    
-    const searchOptions = {
-      q: query,
-      num: parseInt(options.limit || '10'),
-      authentication: session
-    };
-
-    if (options.type) {
-      searchOptions.q += ` AND type:"${options.type}"`;
-    }
-
-    if (options.owner) {
-      searchOptions.q += ` AND owner:${options.owner}`;
-    }
-
-    // Build the sharing REST URL from the session portal
-    const sharingRestUrl = `${session.portal}/portal/sharing/rest`;
-    
-    // Direct REST API call to search items
-    const url = `${sharingRestUrl}/search`;
-    const params = new URLSearchParams({
-      q: searchOptions.q,
-      num: searchOptions.num.toString(),
-      f: 'json',
-      token: session.token
+    const results = await findItems({
+      query,
+      type: options.type,
+      owner: options.owner,
+      limit: options.limit ? parseInt(options.limit) : undefined
     });
-
-    const response = await fetch(`${url}?${params}`);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    const results = await response.json();
     
     if (options.json) {
       console.log(JSON.stringify(results, null, 2));
     } else {
       formatItemSearchResults(results);
     }
-  } catch (error: any) {
-    console.error(`Failed to search items: ${error.message}`);
-    process.exit(1);
+  } catch (error: unknown) {
+    handlePortalError(error, 'search items', options);
   }
 }
 
 export async function getItemCommand(itemId: string, options: any): Promise<void> {
   try {
-    const session = await getSession();
-    if (!session) {
-      console.error('Not authenticated. Please run: aci login');
-      process.exit(1);
-    }
-    
-    // Build the sharing REST URL from the session portal
-    const sharingRestUrl = `${session.portal}/portal/sharing/rest`;
-    
-    // Direct REST API call to get item details
-    const url = `${sharingRestUrl}/content/items/${itemId}`;
-    const params = new URLSearchParams({
-      f: 'json',
-      token: session.token
-    });
-
-    const response = await fetch(`${url}?${params}`);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    const item = await response.json();
+    const item = await getItem(itemId);
     
     if (options.json) {
       console.log(JSON.stringify(item, null, 2));
     } else {
       formatItemDetails(item);
     }
-  } catch (error: any) {
-    console.error(`Failed to get item details: ${error.message}`);
-    process.exit(1);
+  } catch (error: unknown) {
+    handlePortalError(error, 'get item details', options);
   }
 }
 
 export async function shareItemCommand(itemId: string, options: any): Promise<void> {
   try {
-    const session = await getSession();
-    if (!session) {
-      console.error('Not authenticated. Please run: aci login');
-      process.exit(1);
-    }
-    
     if (!options.groups && !options.org && !options.public) {
       console.error('Must specify sharing target: --groups, --org, or --public');
       process.exit(1);
     }
 
-    const shareOptions: any = {
-      id: itemId,
-      authentication: session
+    const shareParams: any = {
+      itemId
     };
 
     if (options.groups) {
-      const groupIds = options.groups.split(',').map((id: string) => id.trim());
-      shareOptions.groups = groupIds;
+      shareParams.groups = options.groups.split(',').map((id: string) => id.trim());
     }
-
     if (options.org) {
-      shareOptions.org = true;
+      shareParams.org = true;
     }
-
     if (options.public) {
-      shareOptions.everyone = true;
+      shareParams.public = true;
     }
 
-    // Build the sharing REST URL from the session portal
-    const sharingRestUrl = `${session.portal}/portal/sharing/rest`;
-    
-    // Direct REST API call to share item
-    const url = `${sharingRestUrl}/content/users/${session.username}/items/${itemId}/share`;
-    const formData = new URLSearchParams({
-      f: 'json',
-      token: session.token
-    });
-
-    if (shareOptions.groups) {
-      formData.append('groups', shareOptions.groups.join(','));
-    }
-    if (shareOptions.org) {
-      formData.append('org', 'true');
-    }
-    if (shareOptions.everyone) {
-      formData.append('everyone', 'true');
-    }
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: formData
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-    
-    const result = await response.json();
+    const result = await shareItem(shareParams);
     
     if (options.json) {
       console.log(JSON.stringify(result, null, 2));
@@ -166,9 +71,8 @@ export async function shareItemCommand(itemId: string, options: any): Promise<vo
       console.log(`  sharing: ${sharing.join(' \u2261 ')}`);
       console.log(`  \u2713 Updated successfully`);
     }
-  } catch (error: any) {
-    console.error(`Failed to share item: ${error.message}`);
-    process.exit(1);
+  } catch (error: unknown) {
+    handlePortalError(error, 'share item', options);
   }
 }
 

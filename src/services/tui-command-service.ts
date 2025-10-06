@@ -3,6 +3,7 @@
  * Replaces CommandFacade with direct function invocation
  */
 
+import { loginCommand, logoutCommand } from '../commands/auth.js';
 import { getUserCommand } from '../commands/users.js';
 import { getGroupCommand } from '../commands/groups.js';
 import { getItemCommand } from '../commands/items.js';
@@ -10,12 +11,16 @@ import { searchCommand } from '../commands/search.js';
 import { inspectCommand } from '../commands/inspect.js';
 import { queryCommand } from '../commands/query.js';
 import { 
-  loginWrapper, 
-  logoutWrapper, 
-  findUsersWrapper, 
-  findGroupsWrapper, 
-  findItemsWrapper 
-} from './tui-command-wrapper.js';
+  findUsers, 
+  findGroups, 
+  findItems, 
+  searchItems as searchPortalItems
+} from '../core/portal.js';
+import {
+  inspectService,
+  queryFeatures,
+  listServices
+} from '../core/server.js';
 import { ArcGISServerAdminClient } from './admin-client.js';
 import { requireAdminSession } from '../session.js';
 import { 
@@ -68,7 +73,29 @@ export class TuiCommandService {
     try {
       const startTime = Date.now();
       
-      const loginData = await loginWrapper({ portal, token, username });
+      // Execute the login command
+      await loginCommand({ portal, token, username });
+      
+      // Get the session that was just created
+      const { getSession } = await import('../session.js');
+      const session = await getSession();
+      if (!session) {
+        throw new Error('Login failed - no session created');
+      }
+      
+      const loginData = {
+        portal,
+        username: session.username || 'api-token-user',
+        token: session.token,
+        expires: session.tokenExpires ? session.tokenExpires.getTime() : (Date.now() + 7200000),
+        session: {
+          portal,
+          username: session.username || 'api-token-user',
+          token: session.token,
+          expires: session.tokenExpires ? session.tokenExpires.getTime() : (Date.now() + 7200000)
+        }
+      };
+      
       this.setSession(loginData.session);
       
       return createSuccessResult(loginData, {
@@ -84,7 +111,7 @@ export class TuiCommandService {
     try {
       const startTime = Date.now();
       
-      await logoutWrapper();
+      await logoutCommand({});
       this.clearSession();
       
       return createSuccessResult(undefined, {
@@ -106,12 +133,19 @@ export class TuiCommandService {
     try {
       const startTime = Date.now();
       
-      const userResult = await findUsersWrapper(query, {
-        limit: String(options.limit || 50),
+      const userResult = await findUsers({
+        query,
+        limit: options.limit || 50,
         filter: options.filter
       });
       
-      return createSuccessResult(userResult, {
+      const searchResult: UserSearchResult = {
+        ...userResult,
+        query,
+        results: userResult.results as any[]
+      };
+      
+      return createSuccessResult(searchResult, {
         source: 'tui',
         executionTime: Date.now() - startTime,
         resultCount: userResult.results?.length || 0,
@@ -130,18 +164,13 @@ export class TuiCommandService {
     try {
       const startTime = Date.now();
       
-      const result = await this.executeCommandDirect<any>(() =>
-        getUserCommand(username, { json: true })
-      );
+      const { getUser } = await import('../core/portal.js');
+      const user = await getUser(username);
       
-      if (result.success) {
-        return createSuccessResult(result.data, {
-          source: 'tui',
-          executionTime: Date.now() - startTime
-        });
-      }
-      
-      return createErrorResult(result.error || 'Failed to get user');
+      return createSuccessResult(user, {
+        source: 'tui',
+        executionTime: Date.now() - startTime
+      });
     } catch (error) {
       return createErrorResult(error instanceof Error ? error.message : 'Failed to get user');
     }
@@ -155,11 +184,18 @@ export class TuiCommandService {
     try {
       const startTime = Date.now();
       
-      const groupResult = await findGroupsWrapper(query, {
-        limit: String(options.limit || 50)
+      const groupResult = await findGroups({
+        query,
+        limit: options.limit || 50
       });
       
-      return createSuccessResult(groupResult, {
+      const searchResult: GroupSearchResult = {
+        ...groupResult,
+        query,
+        results: groupResult.results as any[]
+      };
+      
+      return createSuccessResult(searchResult, {
         source: 'tui',
         executionTime: Date.now() - startTime,
         resultCount: groupResult.results?.length || 0,
@@ -178,12 +214,18 @@ export class TuiCommandService {
     try {
       const startTime = Date.now();
       
-      const itemResult = await findItemsWrapper(query, {
-        limit: options.limit || 50,
-        filter: options.filter
+      const itemResult = await findItems({
+        query,
+        limit: options.limit || 50
       });
       
-      return createSuccessResult(itemResult, {
+      const searchResult: ItemSearchResult = {
+        ...itemResult,
+        query,
+        results: itemResult.results as any[]
+      };
+      
+      return createSuccessResult(searchResult, {
         source: 'tui',
         executionTime: Date.now() - startTime,
         resultCount: itemResult.results?.length || 0,
@@ -200,18 +242,17 @@ export class TuiCommandService {
     try {
       const startTime = Date.now();
       
-      const result = await this.executeCommandDirect<any>(() =>
-        searchCommand(query, { json: true })
-      );
+      const results = await searchPortalItems({
+        query,
+        limit: options.limit || 50
+      });
       
-      if (result.success) {
-        return createSuccessResult(result.data, {
-          source: 'tui',
-          executionTime: Date.now() - startTime
-        });
-      }
-      
-      return createErrorResult(result.error || 'Service search failed');
+      return createSuccessResult(results, {
+        source: 'tui',
+        executionTime: Date.now() - startTime,
+        resultCount: results.results?.length || 0,
+        totalCount: results.total || 0
+      });
     } catch (error) {
       return createErrorResult(error instanceof Error ? error.message : 'Service search failed');
     }
@@ -221,18 +262,12 @@ export class TuiCommandService {
     try {
       const startTime = Date.now();
       
-      const result = await this.executeCommandDirect<any>(() =>
-        inspectCommand(url, { json: true })
-      );
+      const serviceInfo = await inspectService(url, this.session || undefined);
       
-      if (result.success) {
-        return createSuccessResult(result.data, {
-          source: 'tui',
-          executionTime: Date.now() - startTime
-        });
-      }
-      
-      return createErrorResult(result.error || 'Service inspection failed');
+      return createSuccessResult(serviceInfo, {
+        source: 'tui',
+        executionTime: Date.now() - startTime
+      });
     } catch (error) {
       return createErrorResult(error instanceof Error ? error.message : 'Service inspection failed');
     }
@@ -242,23 +277,17 @@ export class TuiCommandService {
     try {
       const startTime = Date.now();
       
-      const result = await this.executeCommandDirect<any>(() =>
-        queryCommand(url, {
-          where: options.where || '1=1',
-          limit: String(options.limit || 100),
-          json: true
-        })
-      );
+      const results = await queryFeatures(url, {
+        where: options.where || '1=1',
+        limit: options.limit || 100,
+        session: this.session || undefined
+      });
       
-      if (result.success) {
-        return createSuccessResult(result.data, {
-          source: 'tui',
-          executionTime: Date.now() - startTime,
-          resultCount: Array.isArray((result.data as any)?.features) ? (result.data as any).features.length : 0
-        });
-      }
-      
-      return createErrorResult(result.error || 'Feature query failed');
+      return createSuccessResult(results, {
+        source: 'tui',
+        executionTime: Date.now() - startTime,
+        resultCount: Array.isArray(results?.features) ? results.features.length : 0
+      });
     } catch (error) {
       return createErrorResult(error instanceof Error ? error.message : 'Feature query failed');
     }
@@ -308,10 +337,17 @@ export class TuiCommandService {
   }
   
   async listServices(): Promise<CommandResult<any[]>> {
-    return this.withAdminClient(async (client) => {
-      const services = await client.listServices();
-      return services;
-    });
+    try {
+      const startTime = Date.now();
+      const services = await listServices();
+      
+      return createSuccessResult(services, {
+        source: 'tui',
+        executionTime: Date.now() - startTime
+      });
+    } catch (error) {
+      return createErrorResult(error instanceof Error ? error.message : 'Failed to list services') as CommandResult<any[]>;
+    }
   }
   
   async getServerLogs(limit: number = 100): Promise<CommandResult<any[]>> {
@@ -403,62 +439,13 @@ export class TuiCommandService {
     });
   }
 
-  // Re-export loginPortal from wrapper
+  // Re-export loginPortal using Core functionality
   async loginPortal(options: { portal: string; token?: string; username?: string }): Promise<CommandResult<any>> {
     try {
-      const result = await loginWrapper(options);
-      return createSuccessResult(result);
+      const result = await this.login(options.portal, options.token, options.username);
+      return result;
     } catch (error) {
       return createErrorResult(error instanceof Error ? error.message : String(error));
-    }
-  }
-  
-  /**
-   * Execute a command function directly and capture its result
-   * This replaces process spawning with direct function calls
-   */
-  private async executeCommandDirect<T>(commandFn: () => Promise<T>): Promise<CommandResult<T>> {
-    try {
-      // Capture console output for commands that write to stdout
-      const originalLog = console.log;
-      const originalError = console.error;
-      let output = '';
-      let errorOutput = '';
-      
-      console.log = (...args) => {
-        output += args.join(' ') + '\n';
-      };
-      console.error = (...args) => {
-        errorOutput += args.join(' ') + '\n';
-      };
-      
-      try {
-        const result = await commandFn();
-        
-        // Restore console
-        console.log = originalLog;
-        console.error = originalError;
-        
-        // If the command wrote JSON to output, try to parse it
-        if (output.trim()) {
-          try {
-            const parsedOutput = JSON.parse(output.trim());
-            return createSuccessResult(parsedOutput);
-          } catch {
-            // Not JSON, return raw output
-            return createSuccessResult(result);
-          }
-        }
-        
-        return createSuccessResult(result);
-      } finally {
-        // Always restore console
-        console.log = originalLog;
-        console.error = originalError;
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Command execution failed';
-      return createErrorResult(errorMessage) as CommandResult<T>;
     }
   }
 }

@@ -1,7 +1,7 @@
 import { getSession } from '../session.js';
 import type { Environment } from '../session.js';
 import { detectServiceType, validateUrl } from '../services/validator.js';
-import { getServiceInfo, getLayerInfo } from '../services/arcgis-client.js';
+import { inspectService, getServiceDirectory, getLayerInfo } from '../core/server.js';
 import { getFederatedToken, isServerFederated } from '../services/federation.js';
 import { handleError } from '../errors/handler.js';
 import { formatService } from '../utils/output.js';
@@ -64,7 +64,7 @@ export async function inspectCommand(url: string, options: InspectOptions): Prom
     switch (serviceType) {
       case 'feature-service':
       case 'map-service':
-        serviceInfo = await getServiceInfo(url, authSession || undefined);
+        serviceInfo = await inspectService(url, authSession || undefined);
         break;
       case 'feature-layer':
       case 'map-layer':
@@ -75,7 +75,7 @@ export async function inspectCommand(url: string, options: InspectOptions): Prom
           const serviceUrl = url.replace(/\/\d+$/, '');
           serviceInfo = await getLayerInfo(serviceUrl, layerId, authSession || undefined);
         } else {
-          serviceInfo = await getServiceInfo(url, authSession || undefined);
+          serviceInfo = await inspectService(url, authSession || undefined);
         }
         break;
       default:
