@@ -9,7 +9,7 @@ import { TextInput, Spinner } from '@inkjs/ui';
 import { useUniversalSearch, useRecentSearches } from '../hooks/useUniversalSearch.js';
 import type { SearchResult, SearchableType } from '../search/SearchEngine.js';
 import { useTheme } from '../themes/theme-manager.js';
-import { useNavigation } from '../../hooks/use-navigation.js';
+import { useNavigationActions } from '../stores/index.js';
 
 interface UniversalSearchProps {
   visible: boolean;
@@ -43,7 +43,7 @@ export function UniversalSearch({
   maxResults = 20 
 }: UniversalSearchProps) {
   const { colors } = useTheme();
-  const { navigate } = useNavigation();
+  const { navigate } = useNavigationActions();
   const [selection, setSelection] = useState<any>({});
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);

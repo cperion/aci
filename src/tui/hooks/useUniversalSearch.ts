@@ -7,7 +7,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { SearchEngine } from '../search/SearchEngine.js';
 import type { SearchResult, SearchOptions, SearchableType } from '../search/SearchEngine.js';
 import { TuiCommandService } from '../../services/tui-command-service.js';
-import { useAuth } from '../../hooks/use-auth.js';
+import { useAuthStore } from '../stores/index.js';
 
 interface UseUniversalSearchOptions extends SearchOptions {
   debounceMs?: number;
@@ -24,8 +24,7 @@ interface SearchState {
 }
 
 export function useUniversalSearch(options: UseUniversalSearchOptions = {}) {
-  const { authState } = useAuth();
-  const { portalSession } = authState;
+  const portalSession = useAuthStore(state => state.portalSession);
   const {
     debounceMs = 300,
     autoSearch = true,
@@ -91,10 +90,13 @@ export function useUniversalSearch(options: UseUniversalSearchOptions = {}) {
 
   // Search function with debouncing
   const search = useCallback((query: string) => {
-    // Clear existing timer
-    if (debounceTimer) {
-      clearTimeout(debounceTimer);
-    }
+    // Clear existing timer using functional update
+    setDebounceTimer(prevTimer => {
+      if (prevTimer) {
+        clearTimeout(prevTimer);
+      }
+      return null;
+    });
 
     // Set new timer
     const timer = setTimeout(() => {
@@ -111,23 +113,29 @@ export function useUniversalSearch(options: UseUniversalSearchOptions = {}) {
       query,
       isLoading: query.length >= minQueryLength
     }));
-  }, [debounceTimer, debounceMs, autoSearch, performSearch, minQueryLength]);
+  }, [debounceMs, autoSearch, performSearch, minQueryLength]);
 
   // Immediate search (no debounce)
   const searchNow = useCallback((query: string) => {
-    if (debounceTimer) {
-      clearTimeout(debounceTimer);
-      setDebounceTimer(null);
-    }
+    // Clear existing timer using functional update
+    setDebounceTimer(prevTimer => {
+      if (prevTimer) {
+        clearTimeout(prevTimer);
+      }
+      return null;
+    });
     performSearch(query);
-  }, [debounceTimer, performSearch]);
+  }, [performSearch]);
 
   // Clear search results
   const clear = useCallback(() => {
-    if (debounceTimer) {
-      clearTimeout(debounceTimer);
-      setDebounceTimer(null);
-    }
+    // Use functional update to access latest timer state
+    setDebounceTimer(prevTimer => {
+      if (prevTimer) {
+        clearTimeout(prevTimer);
+      }
+      return null;
+    });
     
     setState({
       results: [],
@@ -136,7 +144,7 @@ export function useUniversalSearch(options: UseUniversalSearchOptions = {}) {
       hasSearched: false,
       query: ''
     });
-  }, [debounceTimer]);
+  }, []);
 
   // Filter results by type
   const filterByType = useCallback((type: SearchableType) => {
@@ -175,11 +183,14 @@ export function useUniversalSearch(options: UseUniversalSearchOptions = {}) {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (debounceTimer) {
-        clearTimeout(debounceTimer);
-      }
+      setDebounceTimer(prevTimer => {
+        if (prevTimer) {
+          clearTimeout(prevTimer);
+        }
+        return null;
+      });
     };
-  }, [debounceTimer]);
+  }, []);
 
   return {
     // State

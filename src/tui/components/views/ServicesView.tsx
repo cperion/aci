@@ -8,8 +8,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { Box, Text } from 'ink';
 import { TextInput, Spinner, Alert } from '@inkjs/ui';
 import { useTheme } from '../../themes/theme-manager.js';
-import { useNavigation } from '../../../hooks/use-navigation.js';
-import { useSelection } from '../../../hooks/use-selection.js';
+import { useNavigationActions } from '../../stores/index.js';
+import { useEntityStore } from '../../stores/index.js';
 import { useNotification } from '../../../hooks/use-notification.js';
 import { useServiceRestart } from '../../../hooks/use-service-restart.js';
 import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
@@ -39,8 +39,15 @@ export function ServicesView() {
 
   // Simple hooks instead of complex contexts
   const { colors } = useTheme();
-  const { navigate, goBack } = useNavigation();
-  const { selected, toggle, clearAll, getSelectedFrom, hasSelection } = useSelection();
+  const { navigate, goBack } = useNavigationActions();
+  // Use value-stable selection from entity store instead of local state
+  const selectedIds = useEntityStore(state => state.services?.selectedIds || []);
+  const toggleSelection = (id: string) => useEntityStore.getState().toggleSelection('services', id);
+  const clearSelection = () => useEntityStore.getState().clearSelection('services');
+  const hasSelection = selectedIds.length > 0;
+  const isSelected = (id: string) => selectedIds.includes(id);
+  const getSelectedFrom = (items: Service[], getId = (item: Service) => item.serviceName) => 
+    items.filter(item => isSelected(getId(item)));
   const { showSuccess, showError, showWarning, notifications } = useNotification();
   const { restart, isRestarting, getError: getRestartError } = useServiceRestart();
 
@@ -179,7 +186,7 @@ export function ServicesView() {
       setFilteredServices(prev => prev.filter(s => !serviceNames.includes(s.serviceName)));
       
       // Clear selection
-      clearAll();
+      clearSelection();
       
       // Simulate API call
       await new Promise(resolve => setTimeout(resolve, 1500));
@@ -246,7 +253,7 @@ export function ServicesView() {
         // Toggle selection
         const currentService = filteredServices[selectedIndex];
         if (currentService) {
-          toggle(currentService.serviceName);
+          toggleSelection(currentService.serviceName);
         }
         return true;
         
@@ -279,7 +286,7 @@ export function ServicesView() {
         
       case 'c':
         // Clear selection
-        clearAll();
+        clearSelection();
         return true;
         
       case '\r':
@@ -301,12 +308,12 @@ export function ServicesView() {
         }
         return false;
     }
-  }, [filteredServices, selectedIndex, hasSelection, showConfirm, confirmAction, mode, toggle, clearAll, navigate, goBack, loadServices]));
+  }, [filteredServices, selectedIndex, hasSelection, showConfirm, confirmAction, mode, toggleSelection, clearSelection, navigate, goBack, loadServices]));
 
-  // Load services on mount
+  // Load services on mount (one-time setup)
   useEffect(() => {
     loadServices();
-  }, [loadServices]);
+  }, []); // loadServices is stable and doesn't need to be in dependencies
 
   // Loading state
   if (isLoading) {
@@ -428,7 +435,7 @@ export function ServicesView() {
           ) : (
             <Box flexDirection="column">
               {filteredServices.map((service, index) => {
-                const isSelected = selected.includes(service.serviceName);
+                const isServiceSelected = isSelected(service.serviceName);
                 const isCurrent = index === selectedIndex;
                 const isServiceRestarting = isRestarting(service.serviceName);
                 
@@ -437,13 +444,13 @@ export function ServicesView() {
                     <Text
                       color={
                         isCurrent ? colors.selections :
-                        isSelected ? colors.features :
+                        isServiceSelected ? colors.features :
                         colors.primaryText
                       }
                       bold={isCurrent}
                     >
                       {isCurrent ? '▶ ' : '  '}
-                      {isSelected ? '◉ ' : '○ '}
+                      {isServiceSelected ? '◉ ' : '○ '}
                       {isServiceRestarting ? '⟳ ' : ''}
                       {service.serviceName} ({service.type}) - {service.status}
                       {service.folder && ` [${service.folder}]`}

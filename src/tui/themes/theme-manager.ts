@@ -49,7 +49,7 @@ export class ThemeManager {
   }
 
   public getCurrentState(): ThemeState {
-    return { ...this.state };
+    return this.state;
   }
 
   public setTheme(themeName: string): boolean {
@@ -141,7 +141,7 @@ export class ThemeManager {
 }
 
 // Create a React hook for theme management
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 
 export function useTheme(): ThemeState & {
   setTheme: (name: string) => boolean;
@@ -155,15 +155,16 @@ export function useTheme(): ThemeState & {
   useEffect(() => {
     const unsubscribe = manager.subscribe(setState);
     return unsubscribe;
-  }, [manager]);
+  }, []);
 
-  return {
+  // Return stable references to class methods
+  return useMemo(() => ({
     ...state,
-    setTheme: manager.setTheme.bind(manager),
-    nextTheme: manager.nextTheme.bind(manager),
-    previousTheme: manager.previousTheme.bind(manager),
-    randomTheme: manager.randomTheme.bind(manager),
-  };
+    setTheme: manager.setTheme,
+    nextTheme: manager.nextTheme,
+    previousTheme: manager.previousTheme,
+    randomTheme: manager.randomTheme,
+  }), [state]);
 }
 
 // Singleton export

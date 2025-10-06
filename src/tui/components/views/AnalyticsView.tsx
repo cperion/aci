@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Box, Text } from 'ink';
 import { TextInput, Spinner, Alert, Select } from '@inkjs/ui';
-import { useNavigation } from '../../../hooks/use-navigation.js';
+import { useNavigationActions } from '../../stores/index.js';
 import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
 import { TuiCommandService } from '../../../services/tui-command-service.js';
 import type { CommandResult } from '../../../types/command-result.js';
@@ -25,7 +25,7 @@ interface AnalysisTemplate {
 }
 
 export function AnalyticsView() {
-  const { goBack } = useNavigation();
+  const { goBack } = useNavigationActions();
   const [schemas, setSchemas] = useState<DatabaseSchema[]>([]);
   const [templates, setTemplates] = useState<AnalysisTemplate[]>([]);
   const [selectedTemplate, setSelectedTemplate] = useState<string>('');

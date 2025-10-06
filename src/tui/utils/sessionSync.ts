@@ -55,10 +55,18 @@ export class SessionSync {
    * Returns a cleanup function to stop monitoring
    */
   startMonitoring(callback: (authStatus: { portal: boolean; admin: boolean }) => void): () => void {
+    let lastKnownStatus = { portal: false, admin: false };
+    
     const interval = setInterval(async () => {
       if (await this.hasSessionChanged()) {
         const authStatus = await this.readSession();
-        callback(authStatus);
+        
+        // Only call callback if status actually changed
+        if (authStatus.portal !== lastKnownStatus.portal || 
+            authStatus.admin !== lastKnownStatus.admin) {
+          lastKnownStatus = authStatus;
+          callback(authStatus);
+        }
       }
     }, 1000); // Check every second
     

@@ -1,15 +1,14 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { useNavigation } from '../../hooks/use-navigation.js';
-import { useAuth } from '../../hooks/use-auth.js';
+import { useNavigationStore, selectCurrentView } from '../stores/index.js';
+import { useAuthStore, selectAuthStatus } from '../stores/index.js';
 import { useTheme } from '../themes/theme-manager.js';
 import { Pane } from './Pane.js';
 import { ActionFooter } from './ActionFooter.js';
 
 export function Layout({ children }: { children: React.ReactNode }) {
-  const { currentView } = useNavigation();
-  const { authState } = useAuth();
-  const { portal: portalAuth, admin: adminAuth } = authState;
+  const currentView = useNavigationStore(selectCurrentView);
+  const { portal: portalAuth, admin: adminAuth } = useAuthStore(selectAuthStatus);
   const { colors } = useTheme();
   
   // Calculate selected items for footer - simplified for now

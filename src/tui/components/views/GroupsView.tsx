@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Box, Text } from 'ink';
 import { TextInput, Spinner, Alert, Select } from '@inkjs/ui';
-import { useNavigation } from '../../../hooks/use-navigation.js';
-import { useAuth } from '../../../hooks/use-auth.js';
+import { useNavigationActions } from '../../stores/index.js';
+import { useAuthStore, selectAuthStatus, selectPortalSession } from '../../stores/index.js';
 import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
 import { TuiCommandService } from '../../../services/tui-command-service.js';
 import type { CommandResult, GroupSearchResult } from '../../../types/command-result.js';
@@ -20,9 +20,9 @@ interface Group {
 }
 
 export function GroupsView() {
-  const { goBack, navigate } = useNavigation();
-  const { authState } = useAuth();
-  const { portal: portalAuth, portalSession } = authState;
+  const { goBack, navigate } = useNavigationActions();
+  const { portal: portalAuth } = useAuthStore(selectAuthStatus);
+  const portalSession = useAuthStore(selectPortalSession);
   const [groups, setGroups] = useState<Group[]>([]);
   const [filteredGroups, setFilteredGroups] = useState<Group[]>([]);
   const [currentGroupIndex, setCurrentGroupIndex] = useState(0);

@@ -1,8 +1,12 @@
+/**
+ * TUI App with Zustand State Management
+ * Migrated from hook-based state to centralized stores
+ */
+
 import React, { useEffect } from 'react';
 import { render, Box, Text, useApp, useInput } from 'ink';
-import { DatabaseService } from '../services/database-service.js';
-import { useRecentTracking } from './hooks/useRecentTracking.js';
 import { useTheme } from './themes/theme-manager.js';
+import { DatabaseService } from '../services/database-service.js';
 import { 
   useAuthStore, 
   selectAuthStatus 
@@ -18,21 +22,22 @@ import {
   useOverlayActions,
   useThemeActions 
 } from './stores/index.js';
-import type { EntityState } from './stores/types.js';
 import { 
   useEntityStore, 
   selectEntitySelection 
 } from './stores/index.js';
+import type { EntityState } from './stores/types.js';
 import { Layout } from './components/Layout.js';
 import { Pane } from './components/Pane.js';
 import { getView } from './utils/view-registry.js';
 import { ErrorBoundary } from './components/common/ErrorBoundary.js';
-import { HelpSystem, useHelpSystem } from './components/HelpSystem.js';
-import { CommandPalette, useCommandPalette } from './components/CommandPalette.js';
+import { HelpSystem } from './components/HelpSystem.js';
+import { CommandPalette } from './components/CommandPalette.js';
 import { OnboardingHints, useOnboarding } from './components/OnboardingHints.js';
-import { QuickReference, useQuickReference } from './components/QuickReference.js';
-import { UniversalSearch, useUniversalSearchModal } from './components/UniversalSearch.js';
+import { QuickReference } from './components/QuickReference.js';
+import { UniversalSearch } from './components/UniversalSearch.js';
 import { NotificationSystem } from './components/NotificationSystem.js';
+import { useRecentTracking } from './hooks/useRecentTracking.js';
 
 const NavigationPane = React.memo(() => {
   const { colors } = useTheme();
@@ -40,7 +45,6 @@ const NavigationPane = React.memo(() => {
   const authStatus = useAuthStore(selectAuthStatus);
   const { navigate } = useNavigationActions();
   const recentItems = DatabaseService.getRecentItems('view', 5);
-  const parentContext = 'Root';
   
   // Quick access handlers - stable references from store
   const quickAccess = {
@@ -59,10 +63,10 @@ const NavigationPane = React.memo(() => {
     <Box flexDirection="column" gap={1}>
       {/* Breadcrumb */}
       <Box>
-        <Text color={colors.metadata}>← {parentContext}</Text>
+        <Text color={colors.metadata}>← Root</Text>
       </Box>
       
-      {/* Connection Status (moved from InspectionPane) */}
+      {/* Connection Status */}
       <Box flexDirection="column">
         <Text bold color={colors.labels}>Connection Status:</Text>
         <Text color={colors.primaryText}>Portal: {authStatus.portal ? 
@@ -75,7 +79,7 @@ const NavigationPane = React.memo(() => {
         }</Text>
       </Box>
       
-      {/* Quick Access Menu - Now the single source of truth */}
+      {/* Quick Access Menu */}
       <Box marginTop={1} flexDirection="column">
         <Text bold color={colors.labels}>Quick Access:</Text>
         <Text color={colors.metadata}>[l] Login</Text>
@@ -127,7 +131,7 @@ const ContentPane = React.memo(() => {
   
   const selectedCount = getSelectionCount();
   
-  // Main content area - now using view registry
+  // Main content area
   const renderMainContent = () => {
     const ViewComponent = getView(currentView?.id || 'home');
     return <ViewComponent />;
@@ -140,7 +144,7 @@ const ContentPane = React.memo(() => {
         {renderMainContent()}
       </Box>
       
-      {/* Status bar as designed in Option B */}
+      {/* Status bar */}
       <Box borderStyle="single" borderTop borderColor={colors.metadata} paddingX={1}>
         <Text color={colors.metadata}>
           Portal:{authStatus.portal ? '✓' : '○'} | 
@@ -159,7 +163,7 @@ const InspectionPane = React.memo(() => {
   
   // Get selection state from entity store
   const getSelectionState = () => {
-    if (!currentView) return { selectedIds: [], currentItem: null, hasSelection: false };
+    if (!currentView) return {};
     
     const entityType = currentView.id;
     if (['users', 'groups', 'items', 'services', 'admin'].includes(entityType)) {
@@ -204,7 +208,7 @@ const InspectionPane = React.memo(() => {
   
   return (
     <Box flexDirection="column" gap={1}>
-      {/* Show current selection details first */}
+      {/* Show current selection details */}
       {hasSelection && currentItem ? (
         <Box flexDirection="column">
           <Text bold color={colors.labels}>Selection Details</Text>
@@ -237,7 +241,7 @@ const InspectionPane = React.memo(() => {
         </Box>
       )}
       
-      {/* Show available actions for current selection/context */}
+      {/* Show available actions */}
       {availableActions.length > 0 && (
         <Box marginTop={1} flexDirection="column">
           <Text bold color={colors.labels}>Quick Actions</Text>
@@ -252,7 +256,7 @@ const InspectionPane = React.memo(() => {
         </Box>
       )}
       
-      {/* Contextual help - more concise */}
+      {/* Contextual help */}
       <Box marginTop={1} flexDirection="column">
         <Text bold color={colors.labels}>Help</Text>
         {currentView?.id === 'home' && (
@@ -267,7 +271,7 @@ const InspectionPane = React.memo(() => {
         <Text color={colors.metadata}>Press ? for full help</Text>
       </Box>
       
-      {/* Theme info - compact */}
+      {/* Theme info */}
       <Box marginTop={1} flexDirection="column">
         <Text color={colors.metadata}>Theme: {current.scheme}</Text>
         <Text color={colors.metadata}>[ ] cycle • r random</Text>
@@ -279,18 +283,10 @@ const InspectionPane = React.memo(() => {
 // Simplified keyboard manager using store actions
 function KeyboardManager() {
   const { exit } = useApp();
-  const nextTheme = useUIStore(state => state.nextTheme);
-  const previousTheme = useUIStore(state => state.previousTheme);
-  const randomTheme = useUIStore(state => state.randomTheme);
+  const { nextTheme, previousTheme, randomTheme } = useThemeActions();
   const { trackKeyboardUse } = useOnboarding();
   const overlays = useUIStore(selectOverlays);
-  const navigate = useNavigationStore(state => state.navigate);
-  const goBack = useNavigationStore(state => state.goBack);
-  const logoutAll = useAuthStore(state => state.logoutAll);
-  const showHelp = useUIStore(state => state.showHelp);
-  const showCommandPalette = useUIStore(state => state.showCommandPalette);
-  const showUniversalSearch = useUIStore(state => state.showUniversalSearch);
-  const showQuickReference = useUIStore(state => state.showQuickReference);
+  const { navigate } = useNavigationActions();
   
   // Check if any overlay is visible
   const isOverlayVisible = Object.values(overlays).some(visible => visible);
@@ -333,16 +329,16 @@ function KeyboardManager() {
         navigate('home', 'Home');
         break;
       case '?':
-        showHelp();
+        useUIStore.getState().showHelp();
         break;
       case ':':
-        showCommandPalette();
+        useUIStore.getState().showCommandPalette();
         break;
       case '/':
-        showUniversalSearch();
+        useUIStore.getState().showUniversalSearch();
         break;
       case 'Escape':
-        goBack();
+        useNavigationStore.getState().goBack();
         break;
       case 'r':
         if (!key.ctrl) {
@@ -371,16 +367,16 @@ function KeyboardManager() {
           exit();
           break;
         case 'l':
-          logoutAll();
+          useAuthStore.getState().logoutAll();
           break;
         case 'k':
-          showCommandPalette();
+          useUIStore.getState().showCommandPalette();
           break;
         case 'f':
-          showUniversalSearch();
+          useUIStore.getState().showUniversalSearch();
           break;
         case 'h':
-          showQuickReference();
+          useUIStore.getState().showQuickReference();
           break;
       }
     }
@@ -503,7 +499,7 @@ function TuiApp() {
           onClose={hideSearch}
         />
         
-        {/* Notification System - positioned as overlay */}
+        {/* Notification System */}
         <NotificationSystem position="top-right" maxNotifications={3} />
       </Layout>
     </>

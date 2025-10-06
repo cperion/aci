@@ -1,13 +1,13 @@
 import { useEffect } from 'react';
 import { DatabaseService } from '../../services/database-service.js';
-import { useNavigation } from '../../hooks/use-navigation.js';
+import { useNavigationStore } from '../stores/index.js';
 // Removed useSelection import - tracking will be handled by individual components
 
 /**
  * Hook to automatically track recent items based on user navigation and selections
  */
 export function useRecentTracking() {
-  const { currentView } = useNavigation();
+  const currentView = useNavigationStore(state => state.currentView);
 
   // With the new selection pattern, recent tracking will be handled 
   // by individual components when they perform actions on selected items

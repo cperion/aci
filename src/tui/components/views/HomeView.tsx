@@ -1,11 +1,10 @@
 import React from 'react';
 import { Box, Text } from 'ink';
-import { useAuth } from '../../../hooks/use-auth.js';
+import { useAuthStore, selectAuthStatus } from '../../stores/index.js';
 import { useTheme } from '../../themes/theme-manager.js';
 
 export function HomeView() {
-  const { authState } = useAuth();
-  const { portal: portalAuth } = authState;
+  const { portal: portalAuth } = useAuthStore(selectAuthStatus);
   const { colors } = useTheme();
   
   return (

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Box, Text } from 'ink';
 import { Spinner, Alert, Select } from '@inkjs/ui';
-import { useNavigation } from '../../../hooks/use-navigation.js';
+import { useNavigationActions } from '../../stores/index.js';
 import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
 import { TuiCommandService } from '../../../services/tui-command-service.js';
 import type { CommandResult } from '../../../types/command-result.js';
@@ -38,7 +38,7 @@ interface ResourceTrend {
 }
 
 export function InsightsView() {
-  const { goBack } = useNavigation();
+  const { goBack } = useNavigationActions();
   const [authFailures, setAuthFailures] = useState<AuthFailure[]>([]);
   const [serviceHealth, setServiceHealth] = useState<ServiceHealth[]>([]);
   const [commandTrends, setCommandTrends] = useState<CommandTrend[]>([]);

@@ -1,6 +1,5 @@
 import { useMemo } from 'react';
-import { useAuth } from '../../hooks/use-auth.js';
-import { useNavigation } from '../../hooks/use-navigation.js';
+import { useAuthStore, useNavigationStore } from '../stores/index.js';
 
 /**
  * Performance-optimized context selectors
@@ -9,26 +8,27 @@ import { useNavigation } from '../../hooks/use-navigation.js';
 
 // Auth context selectors
 export function useAuthStatus() {
-  const { authState } = useAuth();
+  const portal = useAuthStore(state => state.portal);
+  const admin = useAuthStore(state => state.admin);
   return useMemo(() => ({
-    portal: authState.portal,
-    admin: authState.admin
-  }), [authState.portal, authState.admin]);
+    portal,
+    admin
+  }), [portal, admin]);
 }
 
 export function usePortalAuth() {
-  const { authState } = useAuth();
-  return useMemo(() => authState.portal, [authState.portal]);
+  const portal = useAuthStore(state => state.portal);
+  return useMemo(() => portal, [portal]);
 }
 
 export function useAdminAuth() {
-  const { authState } = useAuth();
-  return useMemo(() => authState.admin, [authState.admin]);
+  const admin = useAuthStore(state => state.admin);
+  return useMemo(() => admin, [admin]);
 }
 
 // Navigation context selectors
 export function useCurrentView() {
-  const { currentView } = useNavigation();
+  const currentView = useNavigationStore(state => state.currentView);
   return useMemo(() => ({
     id: currentView?.id || 'home',
     title: currentView?.title || 'ACI Dashboard'
@@ -36,7 +36,7 @@ export function useCurrentView() {
 }
 
 export function useViewHistory() {
-  const { history } = useNavigation();
+  const history = useNavigationStore(state => state.history);
   return useMemo(() => ({
     current: history[history.length - 1]?.id || 'home',
     previous: history.length > 1 ? history[history.length - 2]?.id : undefined

@@ -1,8 +1,7 @@
 import { useInput, useApp } from 'ink';
 import { useCallback, useRef, useEffect } from 'react';
-import { useNavigation } from '../../hooks/use-navigation.js';
-import { useAuth } from '../../hooks/use-auth.js';
-// Removed useSelection import - components now manage their own selection
+import { useNavigationStore, useAuthStore } from '../stores/index.js';
+// Removed useSelection import - components now manage their own selection now
 import { useHelpSystem } from '../components/HelpSystem.js';
 import { useCommandPalette } from '../components/CommandPalette.js';
 import { useUniversalSearchModal } from '../components/UniversalSearch.js';
@@ -22,10 +21,15 @@ export type KeyBinding = {
  * Unified keyboard gateway that consolidates all keyboard handling logic.
  * Replaces the complex KeyboardProvider + GlobalActionHandlers pattern.
  */
-export function useKeyboardGateway() {
+export function useKeyboardGateway(options: {
+  isActive?: boolean;
+} = {}) {
   const { exit } = useApp();
-  const { navigate, goBack } = useNavigation();
-  const { logoutAll } = useAuth();
+  const { navigate, goBack } = useNavigationStore(state => ({
+    navigate: state.navigate,
+    goBack: state.goBack
+  }));
+  const logoutAll = useAuthStore(state => state.logoutAll);
   // clearSelection removed - components manage their own selection now
   const { showHelp, toggleHelp } = useHelpSystem();
   const { showPalette } = useCommandPalette();
@@ -138,15 +142,15 @@ export function useKeyboardGateway() {
     return categories;
   }, [getAvailableShortcuts]);
 
-  // Main keyboard input handler
-  useInput((input, key) => {
-    // Normalize key input
-    const keyString = normalizeKeyInput(input, key);
-    
+  // Handle keyboard input - returns a handler function
+  const handleInput = useCallback((input: string, key: any) => {
     // Skip if in input mode (basic check)
     if (shouldBypassKeyboard()) {
-      return;
+      return false;
     }
+
+    // Normalize key input
+    const keyString = normalizeKeyInput(input, key);
 
     // Try view-specific bindings first (if we had current view context)
     // For now, just use global bindings
@@ -155,17 +159,22 @@ export function useKeyboardGateway() {
     if (binding) {
       try {
         binding.handler();
+        return true;
       } catch (error) {
         console.error(`Error in keyboard handler for ${keyString} (${binding.description}):`, error);
+        return false;
       }
     }
-  });
+    
+    return false;
+  }, []);
 
   return {
     registerViewBindings,
     registerGlobalBindings,
     getAvailableShortcuts,
     getShortcutsByCategory,
+    handleInput,
   };
 }
 

@@ -6,7 +6,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { TuiCommandService } from '../../services/tui-command-service.js';
 import type { CommandResult } from '../../types/command-result.js';
-import { useAuth } from '../../hooks/use-auth.js';
+import { useAuthStore } from '../stores/index.js';
 
 export type EntityType = 'users' | 'groups' | 'items' | 'services' | 'admin';
 
@@ -59,8 +59,7 @@ export function useEntitySearch<T>({
   filters = [],
   debounceMs = 300
 }: UseEntitySearchOptions<T>) {
-  const { authState } = useAuth();
-  const { portalSession } = authState;
+  const portalSession = useAuthStore(state => state.portalSession);
   const commandService = useMemo(() => new TuiCommandService(portalSession || undefined), [portalSession]);
 
   // Core state
@@ -211,15 +210,15 @@ export function useEntitySearch<T>({
     loadData();
   }, [loadData]);
 
-  // Load data on mount
+  // Load data on mount (one-time setup)
   useEffect(() => {
     loadData();
-  }, [loadData]);
+  }, []); // loadData is stable and doesn't need to be in dependencies
 
   // Apply filters when they change
   useEffect(() => {
     applySearchAndFilters();
-  }, [activeFilters, applySearchAndFilters]);
+  }, [activeFilters, state.searchTerm, state.items]); // Dependencies are the actual values, not the function
 
   // Cleanup
   useEffect(() => {

@@ -1,16 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { Box, Text } from 'ink';
 import { TextInput, Spinner, Alert } from '@inkjs/ui';
-import { useNavigation } from '../../../hooks/use-navigation.js';
-import { useAuth } from '../../../hooks/use-auth.js';
+import { useNavigationActions } from '../../stores/index.js';
+import { useAuthStore, selectAuthStatus } from '../../stores/index.js';
 import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
 import { TuiCommandService } from '../../../services/tui-command-service.js';
 import type { CommandResult } from '../../../types/command-result.js';
 
 export function LoginView() {
-  const { goBack } = useNavigation();
-  const { authState } = useAuth();
-  const { portal: portalAuth } = authState;
+  const { goBack } = useNavigationActions();
+  const { portal: portalAuth } = useAuthStore(selectAuthStatus);
   const [step, setStep] = useState<'portal' | 'token' | 'username' | 'password' | 'loading'>('portal');
   const [portal, setPortal] = useState('');
   const [token, setToken] = useState('');

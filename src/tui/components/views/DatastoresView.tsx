@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Box, Text } from 'ink';
 import { Spinner, Alert, Select } from '@inkjs/ui';
-import { useNavigation } from '../../../hooks/use-navigation.js';
-import { useAuth } from '../../../hooks/use-auth.js';
+import { useNavigationActions } from '../../stores/index.js';
+import { useAuthStore, selectAuthStatus, selectPortalSession, selectAdminSession } from '../../stores/index.js';
 import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
 import { TuiCommandService } from '../../../services/tui-command-service.js';
 import type { CommandResult } from '../../../types/command-result.js';
@@ -30,9 +30,10 @@ interface ValidationResult {
 }
 
 export function DatastoresView() {
-  const { goBack, navigate } = useNavigation();
-  const { authState } = useAuth();
-  const { portal: portalAuth, admin: adminAuth, portalSession, adminSession } = authState;
+  const { goBack, navigate } = useNavigationActions();
+  const { portal: portalAuth, admin: adminAuth } = useAuthStore(selectAuthStatus);
+  const portalSession = useAuthStore(selectPortalSession);
+  const adminSession = useAuthStore(selectAdminSession);
   const [selection, setSelection] = useState<{ datastoreId?: string }>({});
   const [datastores, setDatastores] = useState<Datastore[]>([]);
   const [validationResults, setValidationResults] = useState<ValidationResult[]>([]);

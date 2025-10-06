@@ -487,7 +487,7 @@ export class ArcGISServerAdminClient {
       throw new DataStoreNotFoundError(name);
     }
     
-    const store = response.items.find(s => s.path.split('/').pop() === name);
+    const store = response.items.find((s: any) => s.path.split('/').pop() === name);
     if (!store) {
       throw new DataStoreNotFoundError(name);
     }

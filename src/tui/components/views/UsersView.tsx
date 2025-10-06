@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Box, Text } from 'ink';
 import { TextInput, Spinner, Alert, Select, MultiSelect } from '@inkjs/ui';
-import { useAuth } from '../../../hooks/use-auth.js';
-import { useNavigation } from '../../../hooks/use-navigation.js';
+import { useAuthStore, selectAuthStatus, selectPortalSession } from '../../stores/index.js';
+import { useNavigationActions } from '../../stores/index.js';
 import { useViewKeyboard } from '../../../hooks/use-view-keyboard.js';
 import { TuiCommandService } from '../../../services/tui-command-service.js';
 
@@ -16,9 +16,9 @@ interface User {
 }
 
 export function UsersView() {
-  const { authState } = useAuth();
-  const { portal: portalAuth, portalSession } = authState;
-  const { goBack, navigate } = useNavigation();
+  const { portal: portalAuth } = useAuthStore(selectAuthStatus);
+  const portalSession = useAuthStore(selectPortalSession);
+  const { goBack, navigate } = useNavigationActions();
   const [users, setUsers] = useState<User[]>([]);
   const [filteredUsers, setFilteredUsers] = useState<User[]>([]);
   const [currentUserIndex, setCurrentUserIndex] = useState(0);
