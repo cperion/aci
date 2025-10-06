@@ -2,9 +2,10 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Box, Text, useInput } from 'ink';
 import { Panel } from '../primitives/Panel';
 import { useTheme } from '../design/theme';
-import { useEntitiesStore } from '../../state/entities';
-import { useNavigationStore } from '../../state/navigation';
+import { useEntitiesStore } from '../state/entities';
+import { useNavigationStore } from '../state/navigation';
 import { FilterInput } from './FilterInput';
+import type { Node } from '../data/types';
 
 interface SearchOverlayProps {
   onClose: () => void;
@@ -15,11 +16,11 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({ onClose }) => {
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const getNode = useEntitiesStore((state) => state.getNode);
-  const { setScope, path } = useNavigationStore();
+  const { setScope, path, navigateToNode } = useNavigationStore();
 
   // Get all searchable nodes
   const allNodes = useMemo(() => {
-    const nodes = Object.values(useEntitiesStore.getState().byId);
+    const nodes: Node[] = Object.values(useEntitiesStore.getState().byId);
     return nodes.filter(node => node.name || node.url);
   }, []);
 
@@ -45,9 +46,14 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({ onClose }) => {
     if (key.return) {
       if (filteredNodes[selectedIndex]) {
         const selectedNode = filteredNodes[selectedIndex];
-        // Navigate to the selected node
-        // This would need more sophisticated path reconstruction
-        console.log('Navigate to:', selectedNode.name);
+        // Determine scope based on selectedNode kind prefix
+        const nextScope = selectedNode.kind.startsWith('server') ? 'server' : 'portal';
+        useNavigationStore.getState().setScope(nextScope as 'server'|'portal');
+        
+        // Navigate to the node using the navigateToNode function
+        setTimeout(() => {
+          useNavigationStore.getState().navigateToNode(selectedNode.id);
+        }, 100); // Small delay to allow scope change to take effect
       }
       onClose();
       return;
@@ -104,7 +110,15 @@ export const SearchOverlay: React.FC<SearchOverlayProps> = ({ onClose }) => {
             onChange={setQuery}
             onSubmit={() => {
               if (filteredNodes[selectedIndex]) {
-                console.log('Navigate to:', filteredNodes[selectedIndex].name);
+                const selectedNode = filteredNodes[selectedIndex];
+                // Determine scope based on selectedNode kind prefix
+                const nextScope = selectedNode.kind.startsWith('server') ? 'server' : 'portal';
+                useNavigationStore.getState().setScope(nextScope as 'server'|'portal');
+                
+                // Navigate to the node using the navigateToNode function
+                setTimeout(() => {
+                  useNavigationStore.getState().navigateToNode(selectedNode.id);
+                }, 100); // Small delay to allow scope change to take effect
               }
               onClose();
             }}

@@ -86,21 +86,39 @@ export class ThemeManager {
 
   private saveTheme(name: string): void {
     try {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(this.storageKey, name);
+      const fs = require('fs');
+      const path = require('path');
+      const os = require('os');
+      
+      const configDir = path.join(os.homedir(), '.aci');
+      const configFile = path.join(configDir, 'theme.json');
+      
+      // Ensure config directory exists
+      if (!fs.existsSync(configDir)) {
+        fs.mkdirSync(configDir, { recursive: true });
       }
+      
+      fs.writeFileSync(configFile, JSON.stringify({ scheme: name }, null, 2));
     } catch {
-      // Ignore localStorage errors
+      // Ignore persistence errors
     }
   }
 
   private loadSavedTheme(): string | null {
     try {
-      if (typeof localStorage !== 'undefined') {
-        return localStorage.getItem(this.storageKey);
+      const fs = require('fs');
+      const path = require('path');
+      const os = require('os');
+      
+      const configFile = path.join(os.homedir(), '.aci', 'theme.json');
+      
+      if (fs.existsSync(configFile)) {
+        const content = fs.readFileSync(configFile, 'utf8');
+        const parsed = JSON.parse(content);
+        return parsed.scheme || null;
       }
     } catch {
-      // Ignore localStorage errors
+      // Ignore persistence errors
     }
     return null;
   }

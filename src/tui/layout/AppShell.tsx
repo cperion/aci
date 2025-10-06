@@ -11,8 +11,8 @@ import { NotificationProvider } from '../components/NotificationProvider.js';
 import { SearchOverlay } from '../components/SearchOverlay.js';
 import { StatusBar } from '../primitives/index.js';
 import { useColorRoles } from '../design/roles.js';
-import { selectBreadcrumb, selectScope, selectNoticeCount, selectActiveOverlay } from '../../state/selectors.js';
-import { useUiStore } from '../../state/ui.js';
+import { selectBreadcrumb, selectScope, selectNoticeCount, selectActiveOverlay, selectAnyFilterActive } from '../state/selectors.js';
+import { useUiStore } from '../state/ui.js';
 import { themeManager } from '../themes/manager.js';
 
 export type AppShellProps = {
@@ -31,6 +31,7 @@ export function AppShell({
   const scope = selectScope();
   const noticeCount = selectNoticeCount();
   const activeOverlay = selectActiveOverlay();
+  const filterActive = selectAnyFilterActive();
   const { hideOverlay } = useUiStore();
 
   return (
@@ -47,12 +48,12 @@ export function AppShell({
           portal={portal}
           username={username}
           isAdmin={isAdmin}
-          filterActive={false} // TODO: Add filter state tracking
+          filterActive={filterActive}
         />
 
         {/* Miller columns navigation */}
         <Box flexGrow={1}>
-          <MillerColumns height="100%" width="100%" />
+          <MillerColumns height={100} width={100} />
         </Box>
 
         {/* Status bar */}

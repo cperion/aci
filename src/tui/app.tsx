@@ -17,9 +17,12 @@ export type TUIAppProps = {
   portal?: string;
   username?: string;
   isAdmin?: boolean;
+  serverHost?: string;
+  portalHost?: string;
+  initialTheme?: string;
 };
 
-function TUIApp({ portal, username, isAdmin }: TUIAppProps) {
+function TUIApp({ portal, username, isAdmin, serverHost, portalHost, initialTheme }: TUIAppProps) {
   const { overlays } = useUiStore();
   const showHelp = overlays.help;
 
@@ -38,6 +41,22 @@ function TUIApp({ portal, username, isAdmin }: TUIAppProps) {
       overlayVisible: Object.values(overlays).some(Boolean),
     });
   }, [overlays, updateContext]);
+
+  // Set initial theme if provided
+  useEffect(() => {
+    if (initialTheme) {
+      themeManager.setTheme(initialTheme);
+    }
+  }, [initialTheme]);
+
+  // Set hosts in navigation store
+  useEffect(() => {
+    if (serverHost || portalHost) {
+      import('./state/navigation.js').then(({ useNavigationStore }) => {
+        useNavigationStore.getState().setHosts(serverHost, portalHost);
+      });
+    }
+  }, [serverHost, portalHost]);
 
   // Validate theme contrast in development
   useEffect(() => {
@@ -70,6 +89,11 @@ function TUIApp({ portal, username, isAdmin }: TUIAppProps) {
  * Start the TUI application
  */
 export async function startTui(props: TUIAppProps = {}): Promise<void> {
+  // Set initial theme if provided
+  if (props.initialTheme) {
+    themeManager.setTheme(props.initialTheme);
+  }
+
   // Validate theme contrast at startup
   const currentTheme = themeManager.getCurrent();
   import('./design/roles.js').then(({ mapBase16ToRoles, validateThemeContrast }) => {

@@ -1,15 +1,18 @@
 import React, { useEffect } from 'react';
 import { Box } from 'ink';
-import { useNavigationStore } from '../../state/navigation';
-import { useEntitiesStore } from '../../state/entities';
-import { useUiStore } from '../../state/ui';
-import { useKeyboardManager } from '../../keyboard';
+import { useNavigationStore } from '../state/navigation';
+import { useEntitiesStore } from '../state/entities';
+// no overlay handling here; keyboard manager is at app level
+
 import { ColumnList } from './ColumnList';
 import { Inspector } from '../layout/Inspector';
 
+// Constants for inspector gating
+const MIN_WIDTH_FOR_INSPECTOR = 120;
+
 interface MillerColumnsProps {
-  height: number;
-  width: number;
+  height: number | string;
+  width: number | string;
 }
 
 export const MillerColumns: React.FC<MillerColumnsProps> = ({ height, width }) => {
@@ -20,23 +23,6 @@ export const MillerColumns: React.FC<MillerColumnsProps> = ({ height, width }) =
   } = useNavigationStore();
 
   const getNode = useEntitiesStore((state) => state.getNode);
-  const { overlays } = useUiStore();
-
-  // Set up keyboard manager
-  const { updateContext } = useKeyboardManager({
-    currentScope: 'miller',
-    overlayVisible: false,
-    millerActive: true,
-  });
-
-  // Update keyboard context when overlays change
-  useEffect(() => {
-    const activeOverlay = Object.entries(overlays).find(([, active]) => active)?.[0];
-    updateContext({
-      overlayVisible: !!activeOverlay,
-      activeOverlay,
-    });
-  }, [overlays, updateContext]);
 
   // Load root data on mount
   useEffect(() => {
@@ -44,15 +30,22 @@ export const MillerColumns: React.FC<MillerColumnsProps> = ({ height, width }) =
   }, [loadRoot]);
 
   // Calculate column widths
-  const columnWidth = Math.floor(width / columns.length);
-  const inspectorWidth = Math.floor(width * 0.25);
-  const columnsWidth = width - inspectorWidth;
+  const w = typeof width === 'string' ? 100 : width;
+  const h = typeof height === 'string' ? 100 : height;
+  const totalWidth = Number(w) || 100;
+  const totalHeight = Number(h) || 100;
+  const columnWidth = Math.floor(totalWidth / Math.max(1, columns.length));
+
+  const inspectorVisible = useNavigationStore((s) => s.inspectorVisible);
+  const showInspector = Boolean(inspectorVisible) && (columns.length < 3 || totalWidth >= MIN_WIDTH_FOR_INSPECTOR);
+  const inspectorWidth = showInspector ? Math.floor(totalWidth * 0.25) : 0;
+  const columnsWidth = totalWidth - inspectorWidth;
 
   const selectedNode = columns[activeColumn]?.nodes[columns[activeColumn].selectedIndex];
   const node = selectedNode ? getNode(selectedNode) : null;
 
   return (
-    <Box flexDirection="row" height={height} width={width}>
+    <Box flexDirection="row" height={totalHeight} width={totalWidth}>
       {/* Columns */}
       <Box flexDirection="row" width={columnsWidth}>
         {columns.map((column, index) => (
@@ -67,16 +60,16 @@ export const MillerColumns: React.FC<MillerColumnsProps> = ({ height, width }) =
                 const delta = selectedIndex - column.selectedIndex;
                 moveSelection(delta);
               }}
-              height={height}
+              height={totalHeight}
             />
           </Box>
         ))}
       </Box>
 
       {/* Inspector */}
-      {node && (
+      {showInspector && node && (
         <Box width={inspectorWidth}>
-          <Inspector node={node} height={height} />
+          <Inspector node={node} height={totalHeight} />
         </Box>
       )}
     </Box>

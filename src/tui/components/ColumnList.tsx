@@ -1,8 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Box, Text, useInput } from 'ink';
-import { ColumnState } from '../../data/types';
-import { useEntitiesStore } from '../../state';
-import { useTheme } from '../../design/roles';
+import type { ColumnState, Node } from '../data/types';
+import { useEntitiesStore } from '../state/entities';
+import { useNavigationStore } from '../state/navigation';
+import { useTheme } from '../design/theme';
 import { FilterInput } from './FilterInput';
 
 interface ColumnListProps {
@@ -22,9 +23,12 @@ export const ColumnList: React.FC<ColumnListProps> = ({
   const getNode = useEntitiesStore((state) => state.getNode);
   const [filterMode, setFilterMode] = useState(false);
   const [filterValue, setFilterValue] = useState(column.filter);
+  const [tempSelectedIndex, setTempSelectedIndex] = useState(column.selectedIndex);
+  const [scrollOffset, setScrollOffset] = useState(0);
 
   const visibleNodes = useMemo(() => {
-    let nodes = column.nodes.map(id => getNode(id)).filter(Boolean);
+    const isNode = (v: Node | undefined): v is Node => !!v;
+    let nodes: Node[] = column.nodes.map(id => getNode(id)).filter(isNode);
     
     // Apply filter if present
     if (filterValue) {
@@ -38,19 +42,63 @@ export const ColumnList: React.FC<ColumnListProps> = ({
     return nodes;
   }, [column.nodes, filterValue, getNode]);
 
+  // Sync temp selection with store when not in filter mode
+  useEffect(() => {
+    if (!filterMode) {
+      setTempSelectedIndex(column.selectedIndex);
+    }
+  }, [column.selectedIndex, filterMode]);
+
+  // Clamp temp selection within filtered results
+  useEffect(() => {
+    if (visibleNodes.length > 0) {
+      setTempSelectedIndex(prev => Math.min(prev, visibleNodes.length - 1));
+    } else {
+      setTempSelectedIndex(0);
+    }
+  }, [visibleNodes.length]);
+
   // Handle keyboard input for filter mode
   useInput((input, key) => {
-    if (!isActive || !filterMode) return;
+    if (!isActive) return;
 
-    if (key.escape) {
-      setFilterMode(false);
-      setFilterValue('');
-      return;
-    }
+    if (filterMode) {
+      if (key.escape) {
+        setFilterMode(false);
+        setFilterValue('');
+        useNavigationStore.getState().clearFilter();
+        return;
+      }
 
-    if (key.return) {
-      setFilterMode(false);
-      return;
+      if (key.return) {
+        setFilterMode(false);
+        useNavigationStore.getState().setFilter(filterValue);
+        // Move store selection to temp selected index
+        onSelect(tempSelectedIndex);
+        return;
+      }
+
+      // Handle j/k navigation during filter mode
+      if (input === 'j' || key.downArrow) {
+        setTempSelectedIndex(prev => 
+          Math.min(prev + 1, visibleNodes.length - 1)
+        );
+        return;
+      }
+
+      if (input === 'k' || key.upArrow) {
+        setTempSelectedIndex(prev => 
+          Math.max(prev - 1, 0)
+        );
+        return;
+      }
+    } else {
+      // Handle entering filter mode
+      if (input === '/') {
+        setFilterMode(true);
+        setFilterValue(column.filter);
+        return;
+      }
     }
   }, { isActive: true });
 
@@ -112,8 +160,12 @@ export const ColumnList: React.FC<ColumnListProps> = ({
       );
     }
 
-    // Calculate visible range for virtualization
-    const startIndex = Math.max(0, column.selectedIndex - Math.floor(contentHeight / 2));
+    // Use temp selection during filter mode, store selection otherwise
+    const currentSelectedIndex = filterMode ? tempSelectedIndex : column.selectedIndex;
+    
+    // Calculate visible range for virtualization with scroll offset
+    const centerIndex = currentSelectedIndex + scrollOffset;
+    const startIndex = Math.max(0, centerIndex - Math.floor(contentHeight / 2));
     const endIndex = Math.min(visibleNodes.length, startIndex + contentHeight);
     const visibleRange = visibleNodes.slice(startIndex, endIndex);
 
@@ -121,7 +173,7 @@ export const ColumnList: React.FC<ColumnListProps> = ({
       <Box flexDirection="column" height={contentHeight}>
         {visibleRange.map((node, index) => {
           const actualIndex = startIndex + index;
-          const isSelected = actualIndex === column.selectedIndex;
+          const isSelected = actualIndex === currentSelectedIndex;
           const glyph = getKindGlyph(node.kind);
 
           return (
@@ -154,12 +206,12 @@ export const ColumnList: React.FC<ColumnListProps> = ({
             onChange={setFilterValue}
             onSubmit={() => {
               setFilterMode(false);
-              // Apply filter to column state
-              // This would need to be handled by the parent component
+              useNavigationStore.getState().setFilter(filterValue);
             }}
             onCancel={() => {
               setFilterMode(false);
               setFilterValue('');
+              useNavigationStore.getState().clearFilter();
             }}
             placeholder="Filter this column..."
           />
@@ -174,6 +226,15 @@ export const ColumnList: React.FC<ColumnListProps> = ({
         <Box marginTop={1}>
           <Text color={theme.textMuted}>
             Filter: {filterValue} (Press '/' to edit, Esc to clear)
+          </Text>
+        </Box>
+      )}
+      
+      {/* Filter mode indicator */}
+      {filterMode && (
+        <Box marginTop={1}>
+          <Text color={theme.info}>
+            Filter mode: j/k to navigate, Enter to apply, Esc to cancel
           </Text>
         </Box>
       )}

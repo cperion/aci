@@ -8,7 +8,7 @@ import { Box, Text } from 'ink';
 import { Panel, Badge, KeyHint } from '../primitives/index.js';
 import { useColorRoles } from '../design/roles.js';
 import { spacing } from '../design/tokens.js';
-import { Node } from '../../data/types.js';
+import type { Node } from '../data/types';
 
 export type InspectorProps = {
   node: Node;

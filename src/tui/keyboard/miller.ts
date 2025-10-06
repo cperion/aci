@@ -92,7 +92,7 @@ export const millerBindings: KeyBinding[] = [
     when: (ctx) => {
       const { columns, activeColumn } = useNavigationStore.getState();
       const column = columns[activeColumn];
-      return column?.filter.length > 0;
+      return (column?.filter?.length ?? 0) > 0;
     },
     run: (ctx) => {
       useNavigationStore.getState().clearFilter();
@@ -140,8 +140,13 @@ export const millerBindings: KeyBinding[] = [
       const column = columns[activeColumn];
       if (column) {
         const selectedNodeId = column.nodes[column.selectedIndex];
-        // This would need clipboard integration
-        console.log('Copy URL:', selectedNodeId);
+        // Clipboard integration can be added; for now, show a notice
+        try {
+          const { pushNotice } = require('../state/ui').useUiStore.getState();
+          pushNotice({ level: 'info', text: `URL: ${selectedNodeId}` });
+        } catch {
+          // noop
+        }
       }
     }
   },
@@ -153,8 +158,13 @@ export const millerBindings: KeyBinding[] = [
       const column = columns[activeColumn];
       if (column) {
         const selectedNodeId = column.nodes[column.selectedIndex];
-        // This would need to open the URL in browser
-        console.log('Open in browser:', selectedNodeId);
+        // Opening external browser is optional; surface as a notice for now
+        try {
+          const { pushNotice } = require('../state/ui').useUiStore.getState();
+          pushNotice({ level: 'info', text: `Open in browser: ${selectedNodeId}` });
+        } catch {
+          // noop
+        }
       }
     }
   },

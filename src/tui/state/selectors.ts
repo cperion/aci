@@ -61,5 +61,10 @@ export const selectSelectedNode = () => {
   if (!column) return null;
   
   const nodeId = column.nodes[column.selectedIndex];
-  return getNode(nodeId) || null;
+  return getNode(nodeId || '') || null;
+};
+
+// Any filter active across columns
+export const selectAnyFilterActive = () => {
+  return useNavigationStore((state) => state.columns.some(c => !!c.filter));
 };

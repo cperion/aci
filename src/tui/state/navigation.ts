@@ -1,14 +1,26 @@
 import { create } from 'zustand';
 import type { MillerState, ColumnState, Node } from '../data/types';
-import { listServerRoot, listServerFolder, listServiceChildren, listLayerOperations } from '../data/arcgis/server';
-import { listPortalRoot, listPortalUsers, listPortalGroups, listPortalItems, listPortalUserItems, listPortalItemOperations } from '../data/arcgis/portal';
+import { 
+  listServerRoot, 
+  listServiceChildren, 
+  listLayerOperations,
+  listPortalRoot, 
+  listPortalUsers, 
+  listPortalGroups, 
+  listPortalItems, 
+  listPortalItemOperations 
+} from '../data/adapters';
 import { useEntitiesStore } from './entities';
 import { useUiStore } from './ui';
 
-interface NavigationState extends MillerState {}
+interface NavigationState extends MillerState {
+  serverHost?: string;
+  portalHost?: string;
+}
 
 interface NavigationActions {
   setScope: (scope: 'server' | 'portal') => void;
+  setHosts: (serverHost?: string, portalHost?: string) => void;
   focusColumn: (index: number) => void;
   moveSelection: (delta: number) => void;
   enter: () => Promise<void>;
@@ -17,6 +29,7 @@ interface NavigationActions {
   clearFilter: () => void;
   refresh: () => Promise<void>;
   toggleInspector: () => void;
+  navigateToNode: (nodeId: string) => Promise<void>;
 }
 
 export type NavigationSlice = NavigationState & NavigationActions & {
@@ -37,6 +50,8 @@ function createInitialColumn(): ColumnState {
 export const useNavigationStore = create<NavigationSlice>((set, get) => ({
   // Initial state
   scope: 'server',
+  serverHost: undefined,
+  portalHost: undefined,
   activeColumn: 0,
   columns: [createInitialColumn(), createInitialColumn()],
   path: [],
@@ -51,6 +66,10 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
     });
     // Load root for the new scope
     void get().loadRoot();
+  },
+
+  setHosts: (serverHost?: string, portalHost?: string) => {
+    set({ serverHost, portalHost });
   },
 
   focusColumn: (index: number) => {
@@ -163,31 +182,45 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
 
   // Helper methods
   loadRoot: async () => {
-    const { scope } = get();
+    const { scope, serverHost, portalHost } = get();
     const { upsertNodes } = useEntitiesStore.getState();
+    
+    // Check if required host is available
+    const host = scope === 'server' ? serverHost : portalHost;
+    if (!host) {
+      useUiStore.getState().pushNotice({
+        level: 'warn',
+        text: `Please set ${scope} host using CLI flags`,
+      });
+      return;
+    }
     
     set((state) => {
       const newColumns = [...state.columns];
-      newColumns[0] = { ...newColumns[0], loading: true, error: undefined };
+      const currentColumn = newColumns[0] || createInitialColumn();
+      newColumns[0] = { 
+        ...currentColumn, 
+        loading: true, 
+        error: undefined,
+      };
       return { columns: newColumns };
     });
 
     try {
       let nodes;
       if (scope === 'server') {
-        // For now, use a default server URL - this should come from config
-        nodes = await listServerRoot('https://sampleserver6.arcgisonline.com/arcgis/rest/services');
+        nodes = await listServerRoot(serverHost!);
       } else {
-        // For now, use a default portal URL - this should come from config
-        nodes = await listPortalRoot('https://www.arcgis.com/sharing/rest');
+        nodes = await listPortalRoot(portalHost!);
       }
 
-      upsertNodes(nodes);
+      upsertNodes(nodes, null); // Root nodes have no parent
       
       set((state) => {
         const newColumns = [...state.columns];
+        const currentColumn = newColumns[0] || createInitialColumn();
         newColumns[0] = {
-          ...newColumns[0],
+          ...currentColumn,
           nodes: nodes.map(n => n.id),
           loading: false,
         };
@@ -201,8 +234,9 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
       
       set((state) => {
         const newColumns = [...state.columns];
+        const currentColumn = newColumns[0] || createInitialColumn();
         newColumns[0] = {
-          ...newColumns[0],
+          ...currentColumn,
           loading: false,
           error: error instanceof Error ? error.message : 'Failed to load',
         };
@@ -212,7 +246,7 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
   },
 
   loadChildrenForSelection: async () => {
-    const { activeColumn, columns } = get();
+    const { activeColumn, columns, serverHost, portalHost } = get();
     const column = columns[activeColumn];
     if (!column) return;
 
@@ -228,20 +262,22 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
     set((state) => {
       const newColumns = [...state.columns];
       if (nextColumnIndex < newColumns.length) {
-        newColumns[nextColumnIndex] = { ...newColumns[nextColumnIndex], loading: true, error: undefined };
+        const targetColumn = newColumns[nextColumnIndex] || createInitialColumn();
+        newColumns[nextColumnIndex] = { 
+          ...targetColumn, 
+          loading: true, 
+          error: undefined,
+        };
       }
       return { columns: newColumns };
     });
 
     try {
-      let children;
+      let children: Node[];
       const { upsertNodes } = useEntitiesStore.getState();
 
       // Load children based on node kind
       switch (selectedNode.kind) {
-        case 'serverFolder':
-          children = await listServerFolder(selectedNode.url);
-          break;
         case 'serverService':
           children = await listServiceChildren(selectedNode.url);
           break;
@@ -250,16 +286,13 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
           children = await listLayerOperations(selectedNode.url);
           break;
         case 'portalUsers':
-          children = await listPortalUsers(selectedNode.url.replace('/users', ''));
-          break;
-        case 'portalUser':
-          children = await listPortalUserItems(selectedNode.url);
+          children = await listPortalUsers(portalHost!);
           break;
         case 'portalGroups':
-          children = await listPortalGroups(selectedNode.url.replace('/groups', ''));
+          children = await listPortalGroups(portalHost!);
           break;
         case 'portalItems':
-          children = await listPortalItems(selectedNode.url.replace('/content/items', ''));
+          children = await listPortalItems(portalHost!);
           break;
         case 'portalItem':
           children = await listPortalItemOperations(selectedNode.url);
@@ -268,7 +301,7 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
           children = [];
       }
 
-      upsertNodes(children);
+      upsertNodes(children, selectedNode.id); // Set parent relationship
       
       // Update the parent node
       upsertNodes([{
@@ -281,8 +314,9 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
       set((state) => {
         const newColumns = [...state.columns];
         if (nextColumnIndex < newColumns.length) {
+          const targetColumn = newColumns[nextColumnIndex] || createInitialColumn();
           newColumns[nextColumnIndex] = {
-            ...newColumns[nextColumnIndex],
+            ...targetColumn,
             parentId: selectedNode.id,
             nodes: children.map(c => c.id),
             loading: false,
@@ -299,14 +333,103 @@ export const useNavigationStore = create<NavigationSlice>((set, get) => ({
       set((state) => {
         const newColumns = [...state.columns];
         if (nextColumnIndex < newColumns.length) {
+          const targetColumn = newColumns[nextColumnIndex] || createInitialColumn();
           newColumns[nextColumnIndex] = {
-            ...newColumns[nextColumnIndex],
+            ...targetColumn,
             loading: false,
             error: error instanceof Error ? error.message : 'Failed to load',
           };
         }
         return { columns: newColumns };
       });
+    }
+  },
+
+  navigateToNode: async (nodeId: string) => {
+    const { getParent } = useEntitiesStore.getState();
+    
+    // Build path by walking parents map
+    const pathIds: string[] = [];
+    let currentId: string | null = nodeId;
+    
+    while (currentId !== null) {
+      pathIds.push(currentId);
+      currentId = getParent(currentId);
+    }
+    
+    // Reverse to get path from root to target
+    const pathFromRoot = pathIds.reverse();
+    
+    // Reset columns and rebuild path
+    set((state) => ({
+      columns: [createInitialColumn(), createInitialColumn()],
+      path: [],
+      activeColumn: 0,
+    }));
+
+    // Load and navigate step by step
+    for (let i = 0; i < pathFromRoot.length; i++) {
+      const targetId = pathFromRoot[i];
+      
+      // For root level, make sure we have the root loaded
+      if (i === 0) {
+        await get().loadRoot();
+      }
+      
+      // Find the target node in the current column
+      const { activeColumn, columns } = get();
+      const column = columns[activeColumn];
+      if (!column) continue;
+      
+      const filteredNodes = getFilteredNodes(column);
+      const targetIndex = filteredNodes.findIndex(node => node.id === targetId);
+      
+      if (targetIndex >= 0) {
+        // Select the target node
+        set((state) => {
+          const newColumns = [...state.columns];
+          newColumns[activeColumn] = { ...column, selectedIndex: targetIndex };
+          return { columns: newColumns };
+        });
+        
+        // If not the last node, enter it to load children
+        if (i < pathFromRoot.length - 1) {
+          await get().enter();
+        }
+      } else {
+        // Node not found, try to load parent's children first
+        if (i > 0) {
+          const parentId = pathFromRoot[i - 1];
+          if (parentId) { // Add type guard
+            const parentNode = useEntitiesStore.getState().getNode(parentId);
+            if (parentNode && !parentNode.childrenLoaded) {
+            // Go back to parent and load children
+            set((state) => ({ activeColumn: Math.max(0, activeColumn - 1) }));
+            await get().loadChildrenForSelection();
+            
+            // Try again to find the target
+            const { columns: updatedColumns } = get();
+            const updatedColumn = updatedColumns[activeColumn];
+            if (updatedColumn) {
+              const updatedFilteredNodes = getFilteredNodes(updatedColumn);
+              const updatedTargetIndex = updatedFilteredNodes.findIndex(node => node.id === targetId);
+              
+              if (updatedTargetIndex >= 0) {
+                set((state) => {
+                  const newColumns = [...state.columns];
+                  newColumns[activeColumn] = { ...updatedColumn, selectedIndex: updatedTargetIndex };
+                  return { columns: newColumns };
+                });
+                
+                if (i < pathFromRoot.length - 1) {
+                  await get().enter();
+                }
+              }
+            }
+          }
+        }
+        }
+      }
     }
   },
 }));
@@ -320,11 +443,12 @@ function getFilteredNodes(column: ColumnState): Node[] {
   }
 
   const filter = column.filter.toLowerCase();
+  const isNode = (v: Node | undefined): v is Node => !!v;
   return column.nodes
     .map(id => getNode(id))
-    .filter(Boolean)
+    .filter(isNode)
     .filter((node: Node) => 
       node.name.toLowerCase().includes(filter) ||
       node.kind.toLowerCase().includes(filter)
-    ) as Node[];
+    );
 }

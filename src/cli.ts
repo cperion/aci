@@ -11,6 +11,9 @@ program
   .description('ArcGIS Command Line Interface for enterprise workflows')
   .version('0.1.0')
   .option('--tui', 'Launch Terminal User Interface')
+  .option('--theme <scheme>', 'Initial theme for TUI (e.g., base16-eighties, base16-ocean)')
+  .option('--server-host <url>', 'ArcGIS Server host URL (e.g., https://host/arcgis/rest/services)')
+  .option('--portal-host <url>', 'ArcGIS Portal host URL (e.g., https://host/portal/sharing/rest)')
   .option('--verbose', 'Enable verbose logging')
   .option('--debug', 'Enable debug logging')
   .option('--quiet', 'Suppress non-error output');
@@ -65,9 +68,17 @@ const args = process.argv;
 const tuiFlag = args.includes('--tui');
 
 if (tuiFlag) {
-  // Launch TUI mode
+  // Parse options to get TUI-specific flags
+  program.parse();
+  const options = program.opts();
+  
+  // Launch TUI mode with options
   const { startTui } = await import('./tui/app.js');
-  await startTui();
+  await startTui({
+    initialTheme: options.theme,
+    serverHost: options.serverHost,
+    portalHost: options.portalHost
+  });
 } else {
   // Standard CLI mode
   registerCommands(program);

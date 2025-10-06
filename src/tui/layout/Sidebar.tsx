@@ -8,18 +8,18 @@ import { Box, Text } from 'ink';
 import { Panel, KeyHint } from '../primitives/index.js';
 import { useColorRoles } from '../design/roles.js';
 import { themeManager } from '../themes/manager.js';
-import type { Notification } from '../overlays/index.js';
+import { useUiStore } from '../state/ui.js';
 import { spacing } from '../design/tokens.js';
 
 export type SidebarProps = {
   currentView?: string;
   recentItems?: string[];
   onNavigate?: (view: string) => void;
-  notifications?: Notification[];
 };
 
-export function Sidebar({ currentView, recentItems = [], onNavigate, notifications = [] }: SidebarProps) {
+export function Sidebar({ currentView, recentItems = [], onNavigate }: SidebarProps) {
   const roles = useColorRoles();
+  const notices = useUiStore((s) => s.notices);
 
   const navigationItems = [
     { key: 'h', label: 'Home', id: 'home' },
@@ -60,22 +60,20 @@ export function Sidebar({ currentView, recentItems = [], onNavigate, notificatio
         </>
       )}
 
-      {notifications.length > 0 && (
+      {notices.length > 0 && (
         <>
           <Box>
             <Text color={roles.textMuted} bold>Notifications</Text>
           </Box>
           <Box flexDirection="column" gap={spacing.xs}>
-            {notifications.slice(0, 5).map((n) => (
+            {notices.slice(0, 5).map((n) => (
               <Text key={n.id}>
                 <Text color={
-                  n.type === 'success' ? roles.success :
-                  n.type === 'warning' ? roles.warning :
-                  n.type === 'error'   ? roles.danger  : roles.info
+                  n.level === 'success' ? roles.success :
+                  n.level === 'warn'    ? roles.warning :
+                  n.level === 'error'   ? roles.danger  : roles.info
                 }>● </Text>
-                <Text color={roles.text}>{n.title || ''}</Text>
-                {n.title && n.message ? <Text color={roles.textMuted}> — </Text> : null}
-                <Text color={roles.textMuted}>{n.message}</Text>
+                <Text color={roles.text}>{n.text}</Text>
               </Text>
             ))}
           </Box>

@@ -5,7 +5,7 @@
 
 import React, { useEffect } from 'react';
 import { Box } from 'ink';
-import { useUiStore } from '../../state/ui';
+import { useUiStore } from '../state/ui';
 import { NotificationsOverlay } from '../overlays/NotificationsOverlay';
 
 interface NotificationProviderProps {
@@ -21,7 +21,7 @@ export const NotificationProvider: React.FC<NotificationProviderProps> = ({ chil
       
       {/* Notifications overlay */}
       <NotificationsOverlay
-        notifications={notices.map(notice => ({
+        notifications={notices.map((notice: any) => ({
           id: notice.id,
           type: notice.level,
           message: notice.text,
