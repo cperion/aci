@@ -15,6 +15,7 @@ export type PanelProps = {
   children: React.ReactNode;
   padding?: SpacingKey;
   width?: number | string;
+  height?: number | string;
   border?: boolean;
 };
 
@@ -24,13 +25,14 @@ export function Panel({
   children,
   padding = 'xs',
   width = '100%',
+  height,
   border = false,
 }: PanelProps) {
   const roles = useColorRoles();
   const paddingValue = spacing[padding];
 
   return (
-    <Box width={width} flexDirection="column">
+    <Box width={width} height={height} flexDirection="column">
       {title && (
         <Box paddingX={paddingValue} paddingY={paddingValue}>
           <Text bold color={roles.text}>{title}</Text>

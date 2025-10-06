@@ -27,6 +27,7 @@ export type ColorRoles = {
   // Selection states
   selectionBg: string;
   selection: string;
+  selectionFg: string;
   focus: string;
   
   // Semantic colors
@@ -66,6 +67,7 @@ export function mapBase16ToRoles(scheme: Base16Scheme): ColorRoles {
     // Selection states
     selectionBg: base02,           // Selection Background
     selection: base05,             // Default Foreground (selection text)
+    selectionFg: base05,           // Selection foreground (alias for selection)
     focus: base0E,                 // Keywords, storage, selectors (focus)
     
     // Semantic colors

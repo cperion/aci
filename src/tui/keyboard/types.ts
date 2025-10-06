@@ -2,7 +2,7 @@
  * Keyboard system types
  */
 
-export type Scope = 'global' | 'home' | 'services' | 'users' | 'groups' | 'items' | 'admin';
+export type Scope = 'global' | 'miller';
 
 export type KeyBinding = {
   key: string;
@@ -14,7 +14,9 @@ export type KeyBinding = {
 export type KeyboardContext = {
   currentScope: Scope;
   overlayVisible: boolean;
-  currentView: string;
+  activeOverlay?: string;
+  // Miller-specific context
+  millerActive?: boolean;
   // Additional context can be added as needed
 };
 
@@ -26,4 +28,6 @@ export interface KeyboardManager {
   handleInput(input: string, context: KeyboardContext): boolean;
   getBindingsForScope(scope: Scope): KeyBinding[];
   getAllBindings(): Record<string, KeyBinding[]>;
+  updateContext(updates: Partial<KeyboardContext>): void;
+  getCurrentContext(): KeyboardContext;
 }

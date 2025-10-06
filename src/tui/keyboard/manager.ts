@@ -6,6 +6,8 @@
 import { useInput } from 'ink';
 import type { KeyBinding, KeyBindingMap, KeyboardContext, KeyboardManager, Scope } from './types.js';
 import { globalBindings } from './global.js';
+import { millerBindings } from './miller.js';
+import { useUiStore } from '../state/ui.js';
 
 export class DefaultKeyboardManager implements KeyboardManager {
   private globalBindings: KeyBinding[] = [];
@@ -15,6 +17,7 @@ export class DefaultKeyboardManager implements KeyboardManager {
   constructor(initialContext: KeyboardContext) {
     this.context = initialContext;
     this.globalBindings = [...globalBindings];
+    this.scopeBindings.set('miller', [...millerBindings]);
   }
 
   registerGlobalBinding(binding: KeyBinding): void {
@@ -52,7 +55,11 @@ export class DefaultKeyboardManager implements KeyboardManager {
         }
         
         // Execute the binding
-        binding.run(this.context);
+        try {
+          binding.run(this.context);
+        } catch (error) {
+          console.error('Error executing keyboard binding:', error);
+        }
         return true;
       }
     }
@@ -61,7 +68,7 @@ export class DefaultKeyboardManager implements KeyboardManager {
   }
 
   private getRelevantBindings(): KeyBinding[] {
-    const { currentScope, overlayVisible } = this.context;
+    const { currentScope, overlayVisible, millerActive } = this.context;
     
     // If overlay is visible, only overlay-related bindings should work
     if (overlayVisible) {
@@ -71,11 +78,19 @@ export class DefaultKeyboardManager implements KeyboardManager {
     }
     
     // Get bindings in precedence order:
-    // 1. Scope-specific bindings
+    // 1. Miller scope bindings (if active)
     // 2. Global bindings
     
-    const scopeBindings = this.scopeBindings.get(currentScope) || [];
-    return [...scopeBindings, ...this.globalBindings];
+    let bindings: KeyBinding[] = [];
+    
+    if (millerActive && currentScope === 'miller') {
+      const scopeBindings = this.scopeBindings.get('miller') || [];
+      bindings = [...scopeBindings];
+    }
+    
+    bindings = [...bindings, ...this.globalBindings];
+    
+    return bindings;
   }
 
   getBindingsForScope(scope: Scope): KeyBinding[] {
@@ -116,10 +131,21 @@ export function useKeyboardManager(
     } else if (key.return) {
       inputStr = 'return';
     } else if (key.tab) {
-      inputStr = 'tab';
+      inputStr = key.shift ? 'shift-tab' : 'tab';
     } else if (key.ctrl && input) {
       inputStr = `ctrl-${input}`;
+    } else if (key.meta && input) {
+      inputStr = `meta-${input}`;
     }
+    
+    // Update context with current overlay state
+    const overlays = useUiStore.getState().overlays;
+    const activeOverlay = Object.entries(overlays).find(([, active]) => active)?.[0];
+    
+    manager.updateContext({
+      overlayVisible: !!activeOverlay,
+      activeOverlay,
+    });
     
     manager.handleInput(inputStr);
   });

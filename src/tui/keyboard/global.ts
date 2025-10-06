@@ -5,72 +5,31 @@
 
 import type { KeyBinding } from './types.js';
 import { themeManager } from '../themes/manager.js';
+import { useUiStore } from '../state/ui.js';
+import { useNavigationStore } from '../state/navigation.js';
 
 export const globalBindings: KeyBinding[] = [
-  // Navigation
-  {
-    key: 'h',
-    description: 'Navigate to Home',
-    run: (ctx) => {
-      (global as any).tuiHandlers?.navigate?.('home');
-    }
-  },
-  {
-    key: 's',
-    description: 'Navigate to Services',
-    run: (ctx) => {
-      (global as any).tuiHandlers?.navigate?.('services');
-    }
-  },
-  {
-    key: 'u',
-    description: 'Navigate to Users',
-    run: (ctx) => {
-      (global as any).tuiHandlers?.navigate?.('users');
-    }
-  },
-  {
-    key: 'g',
-    description: 'Navigate to Groups',
-    run: (ctx) => {
-      (global as any).tuiHandlers?.navigate?.('groups');
-    }
-  },
-  {
-    key: 'i',
-    description: 'Navigate to Items',
-    run: (ctx) => {
-      (global as any).tuiHandlers?.navigate?.('items');
-    }
-  },
-  {
-    key: 'a',
-    description: 'Navigate to Admin',
-    run: (ctx) => {
-      (global as any).tuiHandlers?.navigate?.('admin');
-    }
-  },
-
   // Help and overlays
   {
     key: '?',
     description: 'Toggle Help overlay',
     run: (ctx) => {
-      (global as any).tuiHandlers?.toggleHelp?.();
+      useUiStore.getState().toggleOverlay('help');
     }
   },
   {
     key: 'p',
     description: 'Open Command Palette',
     run: (ctx) => {
-      console.log('Open Command Palette');
+      useUiStore.getState().toggleOverlay('palette');
     }
   },
   {
     key: '/',
     description: 'Universal Search',
+    when: (ctx) => !ctx.millerActive,
     run: (ctx) => {
-      console.log('Universal Search');
+      useUiStore.getState().toggleOverlay('search');
     }
   },
 
@@ -92,8 +51,25 @@ export const globalBindings: KeyBinding[] = [
   {
     key: 'r',
     description: 'Random theme',
+    when: (ctx) => !ctx.millerActive, // Don't conflict with Miller refresh
     run: () => {
       themeManager.random();
+    }
+  },
+
+  // Scope switching
+  {
+    key: 's',
+    description: 'Switch to Server scope',
+    run: (ctx) => {
+      useNavigationStore.getState().setScope('server');
+    }
+  },
+  {
+    key: 'P',
+    description: 'Switch to Portal scope',
+    run: (ctx) => {
+      useNavigationStore.getState().setScope('portal');
     }
   },
 
@@ -102,7 +78,7 @@ export const globalBindings: KeyBinding[] = [
     key: 'q',
     description: 'Quit application',
     run: (ctx) => {
-      (global as any).tuiHandlers?.quit?.();
+      process.exit(0);
     }
   },
 
@@ -112,7 +88,11 @@ export const globalBindings: KeyBinding[] = [
     description: 'Close overlay',
     when: (ctx) => ctx.overlayVisible,
     run: (ctx) => {
-      (global as any).tuiHandlers?.closeOverlay?.();
+      const { overlays } = useUiStore.getState();
+      const activeOverlay = Object.entries(overlays).find(([, active]) => active)?.[0];
+      if (activeOverlay) {
+        useUiStore.getState().hideOverlay(activeOverlay as any);
+      }
     }
   }
 ];

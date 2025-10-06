@@ -3,14 +3,13 @@
  * Main application component with error boundary and state management
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { render } from 'ink';
 import { AppShell } from './layout/index.js';
 import { HelpOverlay } from './overlays/index.js';
-import type { Notification } from './overlays/index.js';
 import { ErrorBoundary } from './components/ErrorBoundary.js';
 import { useKeyboardManager } from './keyboard/index.js';
-import type { Scope } from './keyboard/index.js';
+import { useUiStore } from './state/ui.js';
 import { themeManager } from './themes/manager.js';
 import { validateThemeContrast } from './design/roles.js';
 
@@ -21,27 +20,24 @@ export type TUIAppProps = {
 };
 
 function TUIApp({ portal, username, isAdmin }: TUIAppProps) {
-  const [currentView, setCurrentView] = useState<string>('home');
-  const [showHelp, setShowHelp] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const { overlays } = useUiStore();
+  const showHelp = overlays.help;
 
-  // Keyboard context
+  // Keyboard context for Miller columns
   const keyboardContext = {
-    currentScope: currentView as Scope,
-    overlayVisible: showHelp,
-    currentView,
+    currentScope: 'miller' as const,
+    overlayVisible: Object.values(overlays).some(Boolean),
+    millerActive: true,
   };
 
   const { updateContext } = useKeyboardManager(keyboardContext);
 
-  // Update keyboard context when state changes
+  // Update keyboard context when overlays change
   useEffect(() => {
     updateContext({
-      currentScope: currentView as Scope,
-      overlayVisible: showHelp,
-      currentView,
+      overlayVisible: Object.values(overlays).some(Boolean),
     });
-  }, [currentView, showHelp, updateContext]);
+  }, [overlays, updateContext]);
 
   // Validate theme contrast in development
   useEffect(() => {
@@ -54,74 +50,17 @@ function TUIApp({ portal, username, isAdmin }: TUIAppProps) {
     }
   }, []);
 
-  // Add notification helper
-  const addNotification = (notification: Omit<Notification, 'id' | 'timestamp'>) => {
-    const newNotification: Notification = {
-      ...notification,
-      id: Math.random().toString(36).substr(2, 9),
-      timestamp: new Date(),
-    };
-    
-    setNotifications(prev => [...prev, newNotification]);
-
-    // Auto-remove notification after timeout
-    const timeout = notification.timeout || 5000;
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== newNotification.id));
-    }, timeout);
-  };
-
-  // Handle view changes
-  const handleViewChange = (view: string) => {
-    setCurrentView(view);
-    addNotification({
-      type: 'info',
-      title: 'Navigation',
-      message: `Switched to ${view} view`,
-    });
-  };
-
-  // Override global keyboard handlers for our app
-  useEffect(() => {
-    // Register custom keyboard handlers
-    const handlers = {
-      toggleHelp: () => setShowHelp((v) => !v),
-      closeOverlay: () => setShowHelp(false),
-      quit: () => {
-        if (showHelp) {
-          setShowHelp(false);
-        } else {
-          process.exit(0);
-        }
-      },
-      navigate: (view: string) => {
-        handleViewChange(view);
-      }
-    } as const;
-
-    // These will be called by the keyboard manager
-    (global as any).tuiHandlers = handlers;
-
-    return () => {
-      delete (global as any).tuiHandlers;
-    };
-  }, [showHelp]);
-
   return (
     <ErrorBoundary>
       <AppShell
-        initialView={currentView}
         portal={portal}
         username={username}
         isAdmin={isAdmin}
-        onViewChange={handleViewChange}
-        notifications={notifications}
       />
 
       <HelpOverlay
         visible={showHelp}
-        onClose={() => setShowHelp(false)}
-        currentView={currentView}
+        onClose={() => useUiStore.getState().hideOverlay('help')}
       />
     </ErrorBoundary>
   );

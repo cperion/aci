@@ -5,6 +5,9 @@
 export { AppShell } from './AppShell.js';
 export type { AppShellProps } from './AppShell.js';
 
+export { BreadcrumbHeader } from './BreadcrumbHeader.js';
+export type { BreadcrumbHeaderProps } from './BreadcrumbHeader.js';
+
 export { HeaderBar } from './HeaderBar.js';
 export type { HeaderBarProps } from './HeaderBar.js';
 
